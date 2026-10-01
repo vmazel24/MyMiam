@@ -86,8 +86,10 @@ Documentation : [enregistrement](https://developers.openai.com/siwc/token-sharin
   par le navigateur. Les portions estimées et hypothèses restent visibles.
 - Dépense de repos estimée par Mifflin–St Jeor, multipliée par un facteur d'activité
   modifiable sans Garmin. [Publication de l'équation](https://pubmed.ncbi.nlm.nih.gov/2305711/).
-  Macros initiales modifiables : 20 % protéines, 45 % glucides, 35 % lipides ; ce
-  sont des paramètres de départ, pas une prescription individualisée.
+  Macros initiales modifiables : 20 % protéines, 45 % glucides, 35 % lipides.
+  Ce choix se situe dans les intervalles Anses pour l'adulte (protéines 10–20 %,
+  glucides 40–55 %, lipides 35–40 % de l'apport énergétique total), et ne constitue
+  pas une prescription individualisée. [Référence Anses, tableau 4](https://www.anses.fr/sites/default/files/NUT2012SA0103Ra-1.pdf).
 - Pour les jours passés renseignés par Garmin, le **total quotidien remplace**
   l'estimation du profil ; ne pas ajouter les activités à nouveau. Aujourd'hui,
   le total Garmin est accumulé et affiché séparément de la projection sur 24 h.
@@ -96,6 +98,11 @@ Documentation : [enregistrement](https://developers.openai.com/siwc/token-sharin
   énergie calculable. Zéro repas sans confirmation signifie une journée inconnue.
   Modifier un repas rouvre la journée. Les paramètres du profil sont conservés
   au moment de la confirmation, pour stabiliser l'historique des objectifs.
+- Le Dashboard affiche le déficit journalier et son cumul sur 7, 30 ou 90 jours.
+  Les journées manquantes interrompent les graphiques ; aujourd'hui est exclu
+  des bilans définitifs. Sans repas saisi ni confirmation de la journée, les
+  apports restent affichés inconnus. Le total Garmin observé est présenté
+  séparément de l'objectif calculé sur une journée de 24 heures.
 - Les repas favoris servent aussi de recettes personnelles. Les exports JSON
   contiennent les données du journal et aucun identifiant de connexion.
 

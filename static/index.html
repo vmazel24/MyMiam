@@ -68,7 +68,7 @@
         <p class="sidebar-label">MON SUIVI</p>
         <nav aria-label="Navigation principale">
           <button data-view="today" class="nav-button active">
-            <span aria-hidden="true">◫</span> Aujourd’hui</button
+            <span aria-hidden="true">◫</span> Dashboard</button
           ><button data-view="journal" class="nav-button">
             <span aria-hidden="true">≡</span> Journal des repas</button
           ><button data-view="trends" class="nav-button">
@@ -93,7 +93,7 @@
         <header class="topbar">
           <div>
             <p class="eyebrow" id="view-eyebrow">MON ÉQUILIBRE</p>
-            <h1 id="view-title">Aujourd’hui<span class="accent">.</span></h1>
+            <h1 id="view-title">Dashboard<span class="accent">.</span></h1>
           </div>
           <div class="date-controls">
             <button
@@ -122,7 +122,7 @@
               </div>
               <div class="energy-main">
                 <div>
-                  <p class="muted-light">Calories consommées</p>
+                  <p class="muted-light">Calories des repas</p>
                   <div class="big-number" id="intake-kcal">
                     —<small>kcal</small>
                   </div>
@@ -152,7 +152,7 @@
               </div>
               <div class="energy-footer">
                 <div>
-                  <span>Dépense estimée</span
+                  <span id="expenditure-label">Dépense estimée sur 24 h</span
                   ><strong id="expenditure-value">—</strong>
                 </div>
                 <div>
@@ -181,16 +181,63 @@
               ><small>Texte, aliments ou repas habituel.</small>
             </article>
           </div>
-          <div class="section-head spaced">
+          <div class="section-head spaced macro-heading">
             <div>
-              <p class="eyebrow">LES BONS REPÈRES</p>
-              <h2>L’équilibre de mon assiette</h2>
+              <h2>Mes macros</h2>
             </div>
             <button class="text-button" data-view="profile">
               Mes objectifs ↗
             </button>
           </div>
-          <div class="macro-grid" id="macro-cards"></div>
+          <div class="macro-grid compact-macros" id="macro-cards"></div>
+          <p class="footnote muted" id="macro-reference">
+            Objectifs modifiables dans ton profil.
+          </p>
+          <div class="section-head spaced">
+            <div>
+              <p class="eyebrow">PRENDRE DU RECUL</p>
+              <h2>Mon bilan dans la durée</h2>
+            </div>
+            <label
+              >Période<select id="dashboard-period">
+                <option value="7">7 jours</option>
+                <option value="30" selected>30 jours</option>
+                <option value="90">90 jours</option>
+              </select></label
+            >
+          </div>
+          <div
+            id="dashboard-kpis"
+            class="dashboard-kpis"
+            aria-live="polite"
+          ></div>
+          <div class="dashboard-charts">
+            <article class="panel">
+              <div class="section-head">
+                <h3>Déficit par jour</h3>
+                <span class="pill">kcal</span>
+              </div>
+              <div id="daily-deficit-chart" class="chart"></div>
+              <p class="footnote muted">
+                Au-dessus de zéro : déficit. En dessous : surplus.
+              </p>
+            </article>
+            <article class="panel">
+              <div class="section-head">
+                <h3>Déficit cumulé</h3>
+                <span class="pill">kcal</span>
+              </div>
+              <div id="cumulative-deficit-chart" class="chart"></div>
+              <p class="footnote muted">
+                Cumul sur la période sélectionnée. Les surplus le réduisent.
+              </p>
+            </article>
+          </div>
+          <p class="footnote muted">
+            Seuls les jours passés confirmés complets avec un bilan calculable
+            entrent dans ces graphiques. Les jours manquants restent visibles
+            comme des interruptions.
+          </p>
           <div class="section-head spaced">
             <div>
               <p class="eyebrow">AU FIL DE LA JOURNÉE</p>
@@ -365,6 +412,22 @@
                 >
               </div>
               <h3 class="spaced">Répartition des apports</h3>
+              <p class="footnote muted macro-guidance">
+                Repères Anses pour l’adulte : protéines 10–20 %, glucides 40–55
+                %, lipides 35–40 % des calories. Notre point de départ 20 / 45 /
+                35 est un choix dans ces intervalles, modifiable selon ton
+                objectif. Les grammes sont calculés à partir de ton objectif
+                calorique.
+                <a
+                  href="https://www.anses.fr/sites/default/files/NUT2012SA0103Ra-1.pdf"
+                  target="_blank"
+                  rel="noopener"
+                  >Référence Anses, tableau 4 ↗</a
+                >
+              </p>
+              <button id="reset-macros" type="button" class="text-button">
+                Reprendre les repères 20 / 45 / 35
+              </button>
               <div class="form-grid three">
                 <label
                   >Protéines (%)<input
@@ -454,9 +517,10 @@
                   Synchroniser les 7 derniers jours
                 </button>
                 <p class="footnote muted">
-                  Connecteur communautaire. Mot de passe non conservé ; jetons
-                  stockés sur le serveur. Le total quotidien inclut déjà les
-                  calories actives.
+                  Synchronisation automatique chaque heure après la connexion.
+                  Garmin transmet les calories dépensées ; les calories des
+                  repas viennent de ton journal. Le total quotidien inclut déjà
+                  les calories actives.
                 </p>
               </article>
               <article class="panel">

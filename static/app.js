@@ -38,7 +38,7 @@ const state = {
   requestId: null,
   profile: null,
 };
-let toastTimer, integrationTimer, previewTimer;
+let toastTimer, integrationTimer, dashboardTimer, previewTimer;
 
 async function api(path, options = {}) {
   let response;
@@ -102,6 +102,7 @@ function showLogin() {
   state.integrations = null;
   $("meal-text").value = "";
   clearInterval(integrationTimer);
+  clearInterval(dashboardTimer);
 }
 async function showApp(user) {
   state.user = user;
@@ -114,8 +115,10 @@ async function showApp(user) {
   await loadAll();
   clearInterval(integrationTimer);
   integrationTimer = setInterval(() => {
-    if (state.user) loadIntegrations().catch(() => {});
+    if (state.user && !document.hidden) loadIntegrations().catch(() => {});
   }, 15000);
+  clearInterval(dashboardTimer);
+  dashboardTimer = setInterval(refreshVisibleDashboard, 60000);
 }
 async function loadAll() {
   $("global-error").hidden = true;
@@ -136,6 +139,7 @@ async function loadDashboard() {
   state.summary = result;
   renderDashboard();
   renderMeals();
+  await loadDashboardHistory();
 }
 async function loadFavorites() {
   const data = await api("/api/favorites");
@@ -152,6 +156,13 @@ async function loadProfile() {
       const input = $("profile-form").elements.namedItem(key);
       if (input) input.value = value;
     }
+  renderMacroReference();
+}
+function renderMacroReference() {
+  const p = state.profile;
+  $("macro-reference").textContent = p
+    ? `Objectifs : ${fmt(p.protein_pct)} % protéines · ${fmt(p.carbs_pct)} % glucides · ${fmt(p.fat_pct)} % lipides. Repères Anses disponibles dans ton profil.`
+    : "Point de départ : 20 % protéines · 45 % glucides · 35 % lipides, dans les intervalles Anses. Complète ton profil pour calculer les grammes.";
 }
 async function loadIntegrations() {
   const data = await api("/api/integrations");
@@ -177,7 +188,7 @@ async function loadIntegrations() {
       mfa: "Garmin attend ton code de vérification.",
     }[ga.state] ||
     (ga.connected
-      ? "Garmin est connecté. Synchronise pour récupérer tes données."
+      ? "Garmin est connecté · synchronisation automatique chaque heure."
       : "Pas encore connecté.");
   $("garmin-form").hidden =
     ga.connected || ga.state === "connecting" || ga.state === "mfa";
@@ -190,15 +201,24 @@ async function loadIntegrations() {
 function renderDashboard() {
   const s = state.summary,
     goal = s.targets?.kcal;
-  $("intake-kcal").innerHTML = `${fmt(s.intake.kcal)}<small>kcal</small>`;
+  const logged = s.has_meals || s.complete;
+  const ga = s.garmin;
+  $("intake-kcal").innerHTML =
+    `${fmt(logged ? s.intake.kcal : null)}<small>kcal</small>`;
+  $("expenditure-label").textContent = ga?.has_data
+    ? ga.partial
+      ? "Garmin · dépensé jusqu’ici"
+      : "Garmin · dépense de la journée"
+    : "Dépense estimée sur 24 h";
+  const displayedExpenditure = ga?.has_data ? ga.total : s.expenditure;
   $("expenditure-value").textContent =
-    s.expenditure == null ? "—" : fmt(s.expenditure) + " kcal";
+    displayedExpenditure == null ? "—" : fmt(displayedExpenditure) + " kcal";
   $("target-value").textContent = goal == null ? "—" : fmt(goal) + " kcal";
   $("deficit-value").textContent =
     s.deficit == null
       ? "À compléter"
       : `${s.deficit >= 0 ? "−" : "+"}${fmt(Math.abs(s.deficit))} kcal`;
-  const pct = goal ? Math.round((s.intake.kcal / goal) * 100) : null;
+  const pct = goal && logged ? Math.round((s.intake.kcal / goal) * 100) : null;
   $("energy-pct").textContent =
     pct == null || s.intake.kcal == null ? "—" : pct + "%";
   $("energy-progress").setAttribute(
@@ -209,7 +229,7 @@ function renderDashboard() {
     s.intake.kcal == null
       ? "Certaines valeurs alimentaires sont manquantes."
       : !s.has_meals
-        ? "Un premier repas pour commencer."
+        ? "Aucun repas saisi. Garmin renseigne la dépense, pas les apports."
         : goal == null
           ? "Complète ton profil pour définir ton objectif."
           : `${fmt(Math.max(0, goal - s.intake.kcal))} kcal jusqu’à ton objectif${s.intake.kcal > goal ? " · objectif dépassé" : ""}.`;
@@ -219,24 +239,25 @@ function renderDashboard() {
       ? "Journal complet"
       : "À compléter";
   $("expenditure-note").textContent =
-    s.expenditure == null
-      ? "Complète ton profil pour calculer tes repères."
-      : `${s.expenditure_source}${s.projected ? " · bilan provisoire" : ""}. Repos estimé : ${fmt(s.resting)} kcal.`;
+    ga?.has_data && ga.partial
+      ? `Le total Garmin est provisoire. ${s.expenditure == null ? "Complète ton profil pour définir un objectif sur 24 h." : `Objectif basé sur une dépense projetée de ${fmt(s.expenditure)} kcal sur 24 h.`}`
+      : s.expenditure == null
+        ? "Complète ton profil pour calculer tes repères."
+        : `${s.expenditure_source}${s.projected ? " · bilan provisoire" : ""}.${s.resting == null ? "" : ` Repos estimé : ${fmt(s.resting)} kcal.`}`;
   $("macro-cards").innerHTML = Object.entries(macroNames)
     .map(([key, name]) => {
-      const value = s.intake[key],
+      const value = logged ? s.intake[key] : null,
         target = s.targets?.[key],
         pct =
           target && value != null ? Math.min(100, (value / target) * 100) : 0;
-      return `<article class="macro-card ${key}"><div class="macro-top">${name}<span class="macro-chip">${key === "protein" ? "Construction" : key === "carbs" ? "Énergie" : "Équilibre"}</span></div><div class="macro-number">${fmt(value, 1)} <small>g${target == null ? "" : " / " + fmt(target) + " g"}</small></div><svg class="macro-bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="6" rx="3"></rect></svg><p class="footnote">${value == null ? "Données à compléter" : target == null ? "Objectif à définir" : fmt(Math.max(0, target - value), 1) + " g jusqu’à l’objectif"}</p></article>`;
+      return `<article class="macro-card ${key}"><div class="macro-top">${name}</div><div class="macro-number">${fmt(value, 1)} <small>g</small></div><p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="4" rx="2"></rect></svg></article>`;
     })
     .join("");
   $("complete-day").textContent = s.complete
     ? "Rouvrir la journée"
     : "Confirmer la journée";
-  const ga = s.garmin;
   $("garmin-day").innerHTML = ga?.has_data
-    ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total ${ga.partial ? "observé jusqu’ici" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Calories actives, déjà incluses</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Repos ${ga.partial ? "accumulé" : "Garmin"}</span></div></div><p class="muted footnote">${ga.partial ? "Données provisoires : l’objectif utilise la projection de ton profil." : "Le total Garmin prend le relais de l’estimation du profil."} Synchronisé le ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
+    ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total ${ga.partial ? "observé jusqu’ici" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Calories actives, déjà incluses</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Repos ${ga.partial ? "accumulé" : "Garmin"}</span></div></div><p class="muted footnote">${ga.partial ? "Données provisoires : l’objectif sur 24 h vient de ton profil." : "Le total Garmin prend le relais de l’estimation du profil."} Synchronisation automatique chaque heure. Dernière mise à jour : ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
     : `<p class="muted">Aucune donnée Garmin pour cette journée. ${state.integrations?.garmin?.connected ? "Tu peux lancer une synchronisation depuis ton profil." : "Connecte Garmin depuis ton profil pour suivre ta dépense."}</p>`;
   if (ga?.activities?.length)
     $("garmin-day").innerHTML +=
@@ -286,7 +307,7 @@ function switchView(view) {
     button.classList.toggle("active", button.dataset.view === view);
   $("view-title").innerHTML =
     {
-      today: "Aujourd’hui",
+      today: "Dashboard",
       journal: "Mes repas",
       trends: "Mes tendances",
       favorites: "Mes habitudes",
@@ -456,6 +477,101 @@ async function parseMeal() {
   $("meal-questions").hidden = !data.questions?.length;
   $("meal-questions").textContent = (data.questions || []).join(" ");
   renderDraft();
+}
+function refreshVisibleDashboard() {
+  if (state.user && !document.hidden && state.view === "today")
+    loadDashboard().catch(globalError);
+}
+document.addEventListener("visibilitychange", refreshVisibleDashboard);
+async function loadDashboardHistory() {
+  const selected = state.day,
+    period = $("dashboard-period").value;
+  const data = await api(`/api/trends?day=${selected}&days=${period}`);
+  if (
+    !state.user ||
+    selected !== state.day ||
+    period !== $("dashboard-period").value
+  )
+    return;
+  const mean = data.covered_days
+    ? data.cumulative_deficit / data.covered_days
+    : null;
+  $("dashboard-kpis").innerHTML = [
+    [
+      "Déficit cumulé",
+      data.covered_days ? fmt(data.cumulative_deficit) + " kcal" : "—",
+    ],
+    ["Déficit moyen", mean == null ? "—" : fmt(mean) + " kcal / jour"],
+    ["Jours exploitables", `${data.covered_days} / ${data.elapsed_days}`],
+  ]
+    .map(
+      ([label, value]) =>
+        `<div><span>${label}</span><strong>${value}</strong></div>`,
+    )
+    .join("");
+  $("daily-deficit-chart").innerHTML = deficitChart(data.days, false);
+  $("cumulative-deficit-chart").innerHTML = deficitChart(data.days, true);
+}
+function deficitChart(days, cumulative) {
+  let running = 0;
+  const values = days.map((d) => {
+    if (d.day >= today() || d.deficit == null) return null;
+    running += d.deficit;
+    return cumulative ? running : d.deficit;
+  });
+  const known = values.filter((v) => v != null);
+  if (!known.length)
+    return '<div class="empty-state chart-empty"><p>Ton premier bilan apparaîtra après une journée passée confirmée complète.</p></div>';
+  const width = 500,
+    height = 220,
+    left = 48,
+    right = 12,
+    top = 15,
+    bottom = 34;
+  const plotWidth = width - left - right,
+    plotHeight = height - top - bottom;
+  let high = Math.ceil(Math.max(0, ...known) / 100) * 100;
+  let low = Math.floor(Math.min(0, ...known) / 100) * 100;
+  if (high === low) {
+    high = 100;
+    low = -100;
+  }
+  const y = (v) => top + ((high - v) / (high - low)) * plotHeight;
+  const step = plotWidth / days.length,
+    x = (i) => left + (i + 0.5) * step;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${cumulative ? "Déficit calorique cumulé" : "Déficit et surplus caloriques par jour"}">`;
+  for (let i = 0; i < 3; i++) {
+    const value = high - ((high - low) * i) / 2;
+    svg += `<line class="grid-line" x1="${left}" x2="${width - right}" y1="${y(value)}" y2="${y(value)}"/><text x="0" y="${y(value) + 4}">${fmt(value)}</text>`;
+  }
+  svg += `<line class="zero-line" x1="${left}" x2="${width - right}" y1="${y(0)}" y2="${y(0)}"/>`;
+  let segment = [];
+  function flush() {
+    if (segment.length > 1)
+      svg += `<polyline class="deficit-line" points="${segment.join(" ")}"/>`;
+    segment = [];
+  }
+  values.forEach((value, i) => {
+    if (value == null) {
+      flush();
+      return;
+    }
+    const title = `${days[i].day} · ${cumulative ? "Cumul" : value >= 0 ? "Déficit" : "Surplus"} : ${fmt(cumulative ? value : Math.abs(value))} kcal`;
+    if (cumulative) {
+      segment.push(`${x(i)},${y(value)}`);
+      svg += `<circle class="deficit-point ${value < 0 ? "surplus" : ""}" data-day="${days[i].day}" data-value="${value}" cx="${x(i)}" cy="${y(value)}" r="3.5"><title>${escapeHTML(title)}</title></circle>`;
+    } else {
+      const barWidth = Math.max(1, Math.min(18, step * 0.62));
+      const barHeight = Math.abs(y(value) - y(0));
+      svg += `<rect class="deficit-bar ${value < 0 ? "surplus" : ""}" data-day="${days[i].day}" data-value="${value}" x="${x(i) - barWidth / 2}" y="${value === 0 ? y(0) - 1 : Math.min(y(value), y(0))}" width="${barWidth}" height="${Math.max(2, barHeight)}" rx="2"><title>${escapeHTML(title)}</title></rect>`;
+    }
+  });
+  flush();
+  days.forEach((d, i) => {
+    if (i % Math.max(1, Math.ceil(days.length / 5)) === 0)
+      svg += `<text text-anchor="middle" x="${x(i)}" y="${height - 8}">${d.day.slice(8)}/${d.day.slice(5, 7)}</text>`;
+  });
+  return svg + "</svg>";
 }
 async function loadTrends() {
   const selected = state.day;
@@ -795,13 +911,13 @@ $("complete-day").addEventListener("click", async () => {
 $("profile-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    await busy(event.currentTarget.querySelector("button"), () =>
+    await busy(event.currentTarget.querySelector('button[type="submit"]'), () =>
       api("/api/profile", {
         method: "PUT",
         body: Object.fromEntries(new FormData(event.currentTarget)),
       }),
     );
-    await loadDashboard();
+    await Promise.all([loadProfile(), loadDashboard()]);
     toast("Profil et objectifs enregistrés.");
   } catch (error) {
     globalError(error);
@@ -824,6 +940,20 @@ $("weight-form").addEventListener("submit", async (event) => {
 $("trend-period").addEventListener("change", () =>
   loadTrends().catch(globalError),
 );
+$("dashboard-period").addEventListener("change", () =>
+  loadDashboardHistory().catch(globalError),
+);
+$("reset-macros").addEventListener("click", () => {
+  for (const [key, value] of Object.entries({
+    protein_pct: 20,
+    carbs_pct: 45,
+    fat_pct: 35,
+  }))
+    $("profile-form").elements.namedItem(key).value = value;
+  toast(
+    "Repères remis à 20 / 45 / 35. Enregistre ton profil pour les appliquer.",
+  );
+});
 $("connect-chatgpt").addEventListener("click", async () => {
   try {
     const data = await api("/api/chatgpt/connect", {

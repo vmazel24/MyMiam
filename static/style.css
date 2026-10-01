@@ -817,6 +817,22 @@ form > .ghost-button {
 .chart .weight-point {
   fill: #729941;
 }
+.chart .zero-line {
+  stroke: #a4ae97;
+  stroke-width: 1.5;
+}
+.chart .deficit-bar,
+.chart .deficit-point {
+  fill: #87ad52;
+}
+.chart .surplus {
+  fill: #c78368;
+}
+.chart .deficit-line {
+  fill: none;
+  stroke: #779d47;
+  stroke-width: 2.5;
+}
 .legend {
   display: flex;
   gap: 7px;
@@ -1406,4 +1422,109 @@ dialog::backdrop {
 }
 .garmin-activity strong {
   white-space: nowrap;
+}
+.macro-heading {
+  margin-top: 22px;
+}
+.macro-heading h2 {
+  font-size: 24px;
+}
+.compact-macros {
+  gap: 12px;
+  margin-top: 10px;
+}
+.compact-macros .macro-card {
+  padding: 14px 16px;
+}
+.compact-macros .macro-number {
+  font-size: 29px;
+  margin: 8px 0 4px;
+}
+.compact-macros .macro-target {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.compact-macros .macro-bar {
+  height: 4px;
+}
+#macro-reference {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+.macro-guidance {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+.dashboard-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 18px 0;
+}
+.dashboard-kpis > div {
+  padding-left: 12px;
+  border-left: 3px solid #c9dcae;
+}
+.dashboard-kpis span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.dashboard-kpis strong {
+  font: 700 26px/1.1 var(--display);
+}
+.dashboard-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.dashboard-charts .panel {
+  padding: 18px;
+}
+.dashboard-charts .chart {
+  overflow: hidden;
+  margin-top: 15px;
+}
+.dashboard-charts svg {
+  min-width: 0;
+}
+.dashboard-charts .chart text {
+  font-size: 12px;
+}
+.chart-empty {
+  min-height: 160px;
+  display: grid;
+  align-items: center;
+}
+@media (max-width: 760px) {
+  .compact-macros {
+    gap: 8px;
+  }
+  .compact-macros .macro-card {
+    padding: 11px;
+  }
+  .compact-macros .macro-number {
+    font-size: 25px;
+  }
+  .compact-macros .macro-target {
+    font-size: 10px;
+  }
+  .dashboard-charts {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-kpis {
+    gap: 8px;
+  }
+  .dashboard-kpis > div {
+    padding-left: 8px;
+  }
+  .dashboard-kpis span {
+    font-size: 10px;
+  }
+  .dashboard-kpis strong {
+    font-size: 21px;
+  }
 }

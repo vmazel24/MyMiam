@@ -217,3 +217,99 @@ test("profile, favorites and trends stay usable on small screens", async ({
     ),
   ).toBe(false);
 });
+
+test("Garmin expenditure is distinct from unlogged food calories", async ({
+  page,
+}) => {
+  await page.route("**/api/dashboard?**", async (route) => {
+    await route.fulfill({
+      json: {
+        day: localDay(),
+        meals: [],
+        has_meals: false,
+        complete: false,
+        intake: { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+        resting: null,
+        expenditure: null,
+        targets: null,
+        deficit: null,
+        projected: true,
+        garmin: {
+          has_data: true,
+          total: 2700,
+          active: 800,
+          resting: 1900,
+          partial: true,
+          activities: [],
+          synced_at: new Date().toISOString(),
+        },
+      },
+    });
+  });
+  await page.locator("#previous-day").click();
+  await expect(page.locator("#view-title")).toContainText("Dashboard");
+  await expect(page.locator("#intake-kcal")).toContainText("—");
+  await expect(page.locator("#expenditure-value")).toContainText("2");
+  expect(
+    (await page.locator("#expenditure-value").textContent()).replace(/\s/g, ""),
+  ).toBe("2700kcal");
+  await expect(page.locator("#expenditure-label")).toContainText(
+    "dépensé jusqu’ici",
+  );
+  await expect(page.locator("#energy-caption")).toContainText(
+    "Aucun repas saisi",
+  );
+  await expect(page.locator("#garmin-day")).toContainText(
+    "automatique chaque heure",
+  );
+  await expect(page.locator("#energy-pct")).toHaveText("—");
+});
+
+test("dashboard deficit charts preserve gaps, surplus and provisional days", async ({
+  page,
+}, info) => {
+  const days = [300, null, -100, 0, 900].map((deficit, i) => {
+    const day = new Date();
+    day.setDate(day.getDate() - 4 + i);
+    const iso = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    return { day: iso, deficit };
+  });
+  await page.route("**/api/trends?**", (route) =>
+    route.fulfill({
+      json: {
+        days,
+        cumulative_deficit: 200,
+        covered_days: 3,
+        elapsed_days: 4,
+        weights: [],
+      },
+    }),
+  );
+  await page.locator("#dashboard-period").selectOption("7");
+  const daily = page.locator("#daily-deficit-chart .deficit-bar");
+  await expect(daily).toHaveCount(3);
+  expect(
+    await daily.evaluateAll((els) => els.map((e) => Number(e.dataset.value))),
+  ).toEqual([300, -100, 0]);
+  await expect(page.locator("#daily-deficit-chart .surplus")).toHaveCount(1);
+  const cumulative = page.locator("#cumulative-deficit-chart .deficit-point");
+  expect(
+    await cumulative.evaluateAll((els) =>
+      els.map((e) => Number(e.dataset.value)),
+    ),
+  ).toEqual([300, 200, 200]);
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-line"),
+  ).toHaveCount(1);
+  await expect(page.locator("#dashboard-kpis")).toContainText("200 kcal");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 1,
+    ),
+  ).toBe(false);
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.screenshot({
+    path: info.outputPath("dashboard-charts.png"),
+    fullPage: true,
+  });
+});
