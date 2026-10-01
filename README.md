@@ -136,7 +136,9 @@ redémarrage et limite les doublons grâce aux identifiants d'envoi.
   Le cumul porte automatiquement sur les jours passés avec au moins un repas
   et une énergie calculable. Aucune confirmation de journée n'est nécessaire.
   Ajouter, modifier, déplacer ou supprimer un repas recalcule les bilans.
-  Sans repas saisi, une journée reste inconnue. Les paramètres du profil sont
+  Sans aucun repas enregistré, une journée est non saisie et exclue du cumul
+  et des moyennes : elle ne produit aucun déficit artificiel, même avec Garmin.
+  Un seul repas suffit pour la réintégrer automatiquement. Les paramètres du profil sont
   conservés lors de la saisie pour stabiliser les objectifs historiques ; les
   objectifs d'aujourd'hui restent modifiables avec le profil.
 - Le Dashboard affiche le déficit journalier et son cumul sur 7, 30 ou 90 jours.

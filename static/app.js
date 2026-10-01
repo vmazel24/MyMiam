@@ -254,7 +254,7 @@ function renderDashboard() {
     ? "Journée en cours"
     : s.complete
       ? "Bilan actualisé"
-      : "Sans repas saisi";
+      : "Journée non saisie";
   $("expenditure-note").textContent =
     ga?.has_data && ga.partial
       ? `Le total Garmin est provisoire. ${s.expenditure == null ? "Complète ton profil pour définir un objectif sur 24 h." : `Objectif basé sur une dépense projetée de ${fmt(s.expenditure)} kcal sur 24 h.`}`
@@ -802,7 +802,7 @@ async function loadTrends() {
     .reverse()
     .map(
       (d) =>
-        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? fmt(d.deficit) : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.projected ? "Provisoire" : d.complete ? "Actualisé" : "Sans repas"}</span></td></tr>`,
+        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? fmt(d.deficit) : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.projected ? "Provisoire" : d.complete ? "Actualisé" : "Non saisie"}</span></td></tr>`,
     )
     .join("");
 }
