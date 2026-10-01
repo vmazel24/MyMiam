@@ -14,7 +14,9 @@ const food = {
 
 test.beforeEach(async ({ page }) => {
   let logged = false,
-    meals = [];
+    meals = [],
+    jobs = [],
+    pendingReads = 0;
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url()),
       path = url.pathname;
@@ -51,22 +53,65 @@ test.beforeEach(async ({ page }) => {
         catalogue: { foods: 3484 },
       };
     else if (path === "/api/foods") data = { foods: [food] };
-    else if (path === "/api/meals/parse")
-      data = {
-        title: "Mon déjeuner",
-        questions: ["Vérifie le poids comestible."],
-        items: [
-          {
-            label: "Riz blanc cuit",
-            grams: 200,
-            estimated: false,
-            note: "",
-            food_id: food.id,
-            matches: [food],
-          },
-        ],
-      };
-    else if (path === "/api/meals" && route.request().method() === "POST") {
+    else if (path === "/api/captures") {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON();
+        jobs = [{ ...body, id: "capture-demo", status: "queued" }];
+        pendingReads = 0;
+        data = { id: "capture-demo" };
+      } else {
+        if (jobs.length && ++pendingReads > 1 && jobs[0].status !== "done") {
+          jobs[0].status = "done";
+          const nutrients = Object.fromEntries(
+            Object.entries(food.nutrients).map(([k, v]) => [k, v * 2]),
+          );
+          meals = [
+            {
+              id: "capture-demo",
+              day: localDay(),
+              slot: "dinner",
+              title: "Mon dîner",
+              text: jobs[0].text,
+              items: [
+                {
+                  food_id: food.id,
+                  name: food.name,
+                  grams: 200,
+                  estimated: true,
+                  note: "Portion estimée",
+                  source: food.source,
+                  flags: {},
+                  nutrients,
+                },
+              ],
+              totals: nutrients,
+              clarifications: [
+                {
+                  item_index: 0,
+                  label: "Taille de la portion",
+                  selected: 0,
+                  options: [
+                    { label: "Moyenne", grams: 200 },
+                    { label: "Petite", grams: 100 },
+                    { label: "Grande", grams: 300 },
+                  ],
+                },
+              ],
+            },
+          ];
+        }
+        data = { jobs };
+      }
+    } else if (path.endsWith("/refine")) {
+      const option = route.request().postDataJSON().option;
+      const grams = [200, 100, 300][option];
+      meals[0].clarifications[0].selected = option;
+      meals[0].items[0].grams = grams;
+      meals[0].totals = Object.fromEntries(
+        Object.entries(food.nutrients).map(([k, v]) => [k, (v * grams) / 100]),
+      );
+      data = { ok: true };
+    } else if (path === "/api/meals" && route.request().method() === "POST") {
       const body = route.request().postDataJSON();
       const item = {
         ...body.items[0],
@@ -125,41 +170,104 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#app")).toBeVisible();
 });
 
-test("dictated text, Luna review and saving directly in the midday journal", async ({
+test("capture closes immediately, inferred evening meal and optional refinement", async ({
   page,
 }, info) => {
   await page
     .getByRole("button", { name: "Ajouter un repas · Midi", exact: true })
     .click();
-  await expect(page.locator("#meal-slot")).toHaveValue("lunch");
-  await page.locator("#meal-text").fill("200 grammes de riz blanc cuit");
-  await page.getByRole("button", { name: "Préparer avec Luna" }).click();
-  await expect(page.locator("#meal-questions")).toContainText(
-    "Vérifie le poids",
-  );
-  await page.getByLabel("Poids (g)", { exact: true }).fill("250");
-  await expect(page.locator("#meal-preview")).toContainText("325");
-  await page
-    .getByLabel("J’ai vérifié les aliments, portions et hypothèses.")
-    .check();
-  await page.getByRole("button", { name: "Enregistrer mon repas" }).click();
+  await expect(page.locator("#meal-slot-field")).not.toBeVisible();
+  await page.locator("#meal-text").fill("Ce soir du riz");
+  await page.getByRole("button", { name: "Envoyer à Luna" }).click();
   await expect(page.locator("#meal-dialog")).not.toBeVisible();
-  await expect(page.locator("#intake-kcal")).toContainText("325");
-  await expect(page.locator("#today-meals")).toContainText("Mon déjeuner");
+  await expect(page.locator("#today-captures")).toContainText("Repas reçu");
+  await expect(page.locator("#intake-kcal")).toContainText("260", {
+    timeout: 10000,
+  });
   await expect(
-    page.locator('#today-meals .meal-period[data-slot="lunch"]'),
-  ).toContainText("325");
-  await expect(page.locator("#complete-day")).toHaveCount(0);
-  await expect(page.locator("#today-meals .meal-period")).toHaveCount(3);
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth + 1,
+    page.locator('#today-meals .meal-period[data-slot="dinner"]'),
+  ).toContainText("Mon dîner");
+  await expect(page.locator("#today-meals")).toContainText(
+    "Précision facultative",
   );
-  expect(overflow).toBe(false);
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page
+    .locator("#today-meals")
+    .getByRole("button", { name: "Grande", exact: true })
+    .click();
+  await expect(page.locator("#intake-kcal")).toContainText("390");
+  await expect(
+    page
+      .locator("#today-meals")
+      .getByRole("button", { name: "Grande", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#complete-day")).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 1,
+    ),
+  ).toBe(false);
   await page.screenshot({
     path: info.outputPath("dashboard.png"),
     fullPage: true,
   });
+});
+
+async function fakeSpeech(page, error = null) {
+  await page.addInitScript(
+    ({ error }) => {
+      window.SpeechRecognition = class {
+        start() {
+          this.onstart?.();
+          if (error) {
+            this.onerror?.({ error });
+            this.onend?.();
+          } else
+            this.onresult?.({
+              results: [[{ transcript: "Ce soir deux pizzas" }]],
+            });
+        }
+        stop() {
+          this.onend?.();
+        }
+        abort() {
+          this.onend?.();
+        }
+      };
+    },
+    { error },
+  );
+  await page.reload();
+  await expect(page.locator("#app")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Ajouter un repas · Soir", exact: true })
+    .click();
+}
+
+test("browser dictation fills text and submits while listening", async ({
+  page,
+}) => {
+  await fakeSpeech(page);
+  await page.getByRole("button", { name: "Dicter mon repas" }).click();
+  await expect(page.locator("#meal-text")).toHaveValue("Ce soir deux pizzas");
+  await expect(page.locator("#meal-text")).toBeDisabled();
+  await page.getByRole("button", { name: "Envoyer à Luna" }).click();
+  await expect(page.locator("#meal-dialog")).not.toBeVisible();
+  await expect(page.locator("#today-captures")).toContainText(
+    "Ce soir deux pizzas",
+  );
+});
+
+test("microphone permission failure keeps the typed meal editable", async ({
+  page,
+}) => {
+  await fakeSpeech(page, "not-allowed");
+  await page.locator("#meal-text").fill("Ce matin un café");
+  await page.getByRole("button", { name: "Dicter mon repas" }).click();
+  await expect(page.locator("#dictation-status")).toContainText(
+    "Autorise le microphone",
+  );
+  await expect(page.locator("#meal-text")).toHaveValue("Ce matin un café");
+  await expect(page.locator("#meal-text")).toBeEnabled();
 });
 
 test("morning midday and evening buttons select their meal period", async ({
@@ -184,7 +292,11 @@ test("manual food search and saving without an AI request", async ({
 }) => {
   let parseCalls = 0;
   page.on("request", (r) => {
-    if (r.url().includes("/api/meals/parse")) parseCalls++;
+    if (
+      r.url().includes("/api/meals/parse") ||
+      (r.url().includes("/api/captures") && r.method() === "POST")
+    )
+      parseCalls++;
   });
   await page
     .locator("#view-today")

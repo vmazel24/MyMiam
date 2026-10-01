@@ -1,7 +1,8 @@
 # MyMiam
 
-Journal nutritionnel personnel : dictée du clavier du téléphone, interprétation
-avec Luna sur le forfait ChatGPT/Codex, validation des portions, calculs depuis
+Journal nutritionnel personnel : dictée du navigateur ou du clavier du téléphone,
+interprétation avec Luna sur le forfait ChatGPT/Codex, estimation automatique des
+portions et précisions facultatives, calculs depuis
 Ciqual 2025 et Open Food Facts, objectifs, tendances et calories Garmin.
 
 Interface adaptée de l'application Renfo du même auteur : typographie Barlow
@@ -72,6 +73,44 @@ Documentation : [enregistrement](https://developers.openai.com/siwc/token-sharin
 [VM auto-hébergée](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms),
 [requêtes sur le forfait](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
 
+## Saisie et dictée
+
+Le bouton **Dicter mon repas** utilise `SpeechRecognition` du navigateur, en
+français. Aucun modèle de transcription n'est installé sur le PC et aucun appel
+à une API de transcription facturée n'est effectué. Selon le navigateur, l'audio
+est transmis à son fournisseur de reconnaissance vocale : seul le texte obtenu
+est envoyé à Luna. Fonctionnalité dépendante du navigateur, de sa connexion et
+de l'autorisation du micro ; le texte et le clavier vocal du téléphone restent
+utilisables. HTTPS et `Permissions-Policy: microphone=(self)` sont nécessaires.
+[Compatibilité et fonctionnement](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition).
+Le modèle Luna connecté accepte le texte, sans entrée audio directe.
+[Modalités du modèle](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
+
+**Envoyer à Luna** ferme le formulaire dès que l'envoi est conservé. Un worker
+traite une file SQLite persistante, enregistre la meilleure estimation sans
+question ni confirmation et déduit Matin/Midi/Soir/Collation depuis le texte.
+L'heure locale et le créneau du bouton servent de repli. Le Dashboard indique
+la progression et les erreurs, avec réessai ou annulation. Le texte d'un envoi
+échoué reste conservé jusqu'à son retrait. Les envois réussis ou annulés sont
+purgés après 24 heures ; les repas enregistrés restent dans le journal.
+
+Luna peut proposer jusqu'à deux précisions facultatives de deux ou trois choix.
+Cliquer recalcule les nutriments depuis le catalogue sans nouvel appel IA.
+Les masses explicitement données restent fixes. Une composition non retrouvée
+reste inconnue et modifiable, sans inventer de calories.
+
+En développement, lancer aussi `.venv/bin/python scripts/process_captures.py`.
+Pour l'installation de référence :
+
+```sh
+cp deploy/mymiam-captures.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mymiam-captures.service
+```
+
+Le worker utilise un verrou exclusif, reprend les traitements interrompus au
+redémarrage et limite les doublons grâce aux identifiants d'envoi.
+
 ## Données et calculs
 
 - **Ciqual 2025**, Anses : 3 484 aliments, données par 100 g, Licence Ouverte 2.0.
@@ -106,7 +145,7 @@ Documentation : [enregistrement](https://developers.openai.com/siwc/token-sharin
   apports restent affichés inconnus. Le total Garmin observé est présenté
   séparément de l'objectif calculé sur une journée de 24 heures.
   Le journal est organisé en Matin, Midi et Soir, avec ajout direct dans chaque
-  créneau ; les collations restent disponibles dans le formulaire de repas.
+  créneau ; les collations sont déduites du texte ou sélectionnables en saisie manuelle.
 - Les repas favoris servent aussi de recettes personnelles. Les exports JSON
   contiennent les données du journal et aucun identifiant de connexion.
 

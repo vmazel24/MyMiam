@@ -173,8 +173,8 @@
               <p class="eyebrow">MOINS DE SAISIE, PLUS DE VIE</p>
               <h2>Raconte <br />ton repas.</h2>
               <p>
-                Dicte avec le micro du clavier de ton téléphone. Vérifie. C’est
-                enregistré.
+                Raconte ce que tu as mangé. Luna estime les portions et s’occupe
+                du reste.
               </p>
               <button class="primary-button" data-action="new-meal">
                 Ajouter mon repas <span aria-hidden="true">＋</span></button
@@ -247,6 +247,11 @@
               Ajouter ＋
             </button>
           </div>
+          <div
+            id="today-captures"
+            class="capture-jobs"
+            aria-live="polite"
+          ></div>
           <div id="today-meals" class="meal-list"></div>
           <div class="section-head spaced">
             <div>
@@ -268,6 +273,11 @@
               Ajouter un repas ＋
             </button>
           </div>
+          <div
+            id="journal-captures"
+            class="capture-jobs"
+            aria-live="polite"
+          ></div>
           <div id="journal-meals" class="meal-list spaced"></div>
         </section>
         <section id="view-trends" class="view" hidden>
@@ -571,7 +581,7 @@
           </button>
         </div>
         <div class="form-grid">
-          <label
+          <label id="meal-slot-field" hidden
             >Repas<select id="meal-slot">
               <option value="breakfast">Matin</option>
               <option value="lunch" selected>Midi</option>
@@ -587,12 +597,25 @@
           maxlength="4000"
           placeholder="Ce midi, 150 g de poulet, 200 g de riz cuit, une cuillère d’huile d’olive…"
         ></textarea>
-        <p class="dictation-hint">
-          ✳ Utilise le micro du clavier de ton téléphone pour dicter ici.
+        <p class="dictation-hint" id="capture-hint">
+          Indique « ce matin », « ce midi » ou « ce soir » si tu veux préciser
+          le créneau. Luna estime les quantités manquantes.
+        </p>
+        <button
+          id="dictate-meal"
+          type="button"
+          class="ghost-button"
+          aria-pressed="false"
+        >
+          🎙 Dicter mon repas
+        </button>
+        <p id="dictation-status" class="footnote muted" role="status">
+          La dictée utilise le service vocal de ton navigateur. Seul le texte
+          est envoyé à Luna.
         </p>
         <div class="capture-actions">
           <button type="button" id="parse-meal" class="primary-button">
-            Préparer avec Luna ✳</button
+            Envoyer à Luna ↗</button
           ><button type="button" id="manual-meal" class="ghost-button">
             Ajouter un aliment ＋
           </button>

@@ -1,0 +1,18 @@
+[Unit]
+Description=MyMiam meal capture worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vmzl/Documents/MyMiam
+Environment=TZ=Europe/Paris
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+ExecStart=/home/vmzl/Documents/MyMiam/.venv/bin/python scripts/process_captures.py
+Restart=on-failure
+RestartSec=5
+Nice=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

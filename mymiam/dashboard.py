@@ -15,6 +15,8 @@ def summary(store, user_id, day):
             meal = dict(row)
             meal["items"] = json.loads(meal["items"])
             meal["totals"] = totals(meal["items"])
+            info = db.execute('SELECT data FROM meal_insights WHERE meal_id=?', (meal['id'],)).fetchone()
+            meal['clarifications'] = json.loads(info[0]) if info else []
             meals.append(meal)
         row = db.execute("SELECT * FROM days WHERE user_id=? AND day=?", (user_id, day)).fetchone()
         # No confirmation step: every logged meal contributes immediately,

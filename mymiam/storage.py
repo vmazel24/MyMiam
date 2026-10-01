@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 
@@ -37,6 +38,14 @@ class Store:
                 CREATE TABLE IF NOT EXISTS garmin_days (
                     user_id TEXT NOT NULL, day TEXT NOT NULL, data TEXT NOT NULL,
                     PRIMARY KEY(user_id, day));
+                CREATE TABLE IF NOT EXISTS captures (
+                    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, day TEXT NOT NULL,
+                    slot_hint TEXT, text TEXT NOT NULL,
+                    status TEXT NOT NULL, meal_id TEXT, error TEXT,
+                    created REAL NOT NULL, updated REAL NOT NULL,
+                    request_id TEXT NOT NULL, signature TEXT NOT NULL, UNIQUE(user_id, request_id));
+                CREATE TABLE IF NOT EXISTS meal_insights (
+                    meal_id TEXT PRIMARY KEY, data TEXT NOT NULL);
             """)
         os.chmod(self.path, 0o600)
 
@@ -60,3 +69,11 @@ class Store:
             db.execute("INSERT OR IGNORE INTO settings VALUES ('owner',?)", (json.dumps(user_id),))
             owner = json.loads(db.execute("SELECT value FROM settings WHERE key='owner'").fetchone()[0])
         return owner == user_id
+
+    def refresh_day(self, db, user_id, day):
+        profile = db.execute("SELECT data FROM profiles WHERE user_id=?", (user_id,)).fetchone()
+        logged = db.execute("SELECT EXISTS(SELECT 1 FROM meals WHERE user_id=? AND day=?)", (user_id, day)).fetchone()[0]
+        db.execute("""INSERT INTO days VALUES (?,?,?,?)
+                      ON CONFLICT(user_id,day) DO UPDATE SET complete=excluded.complete,
+                      goal=CASE WHEN excluded.day=? THEN excluded.goal ELSE COALESCE(days.goal,excluded.goal) END""",
+                   (user_id, day, logged, profile[0] if profile else None, date.today().isoformat()))

@@ -20,6 +20,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from mymiam.dashboard import summary, trends
+from mymiam.captures import favorite_context, prepare_draft
 from mymiam.garmin import GarminConnector
 from mymiam.nutrition import finite_number, food_record, normalize, resolve_items, search_foods, totals, valid_day, validate_profile
 from mymiam.openai_plan import ChatGPTPlan, PlanError
@@ -109,7 +110,7 @@ def create_app(config=None):
     @app.after_request
     def security(response):
         response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
-            "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+            "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(self), geolocation=()",
             "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
@@ -262,15 +263,7 @@ def create_app(config=None):
 
     def refresh_day(db, day):
         """Include logged meals automatically and preserve historical goals."""
-        user_id = g.user["id"]
-        profile = db.execute("SELECT data FROM profiles WHERE user_id=?", (user_id,)).fetchone()
-        logged = db.execute("SELECT EXISTS(SELECT 1 FROM meals WHERE user_id=? AND day=?)",
-                            (user_id, day)).fetchone()[0]
-        goal = profile[0] if profile else None
-        db.execute("""INSERT INTO days VALUES (?,?,?,?)
-                      ON CONFLICT(user_id,day) DO UPDATE SET complete=excluded.complete,
-                      goal=CASE WHEN excluded.day=? THEN excluded.goal ELSE COALESCE(days.goal,excluded.goal) END""",
-                   (user_id, day, logged, goal, date.today().isoformat()))
+        store.refresh_day(db, g.user["id"], day)
 
     def meal_fields(payload):
         day = valid_day(payload.get("day"))
@@ -313,6 +306,7 @@ def create_app(config=None):
                 return jsonify(error="Repas introuvable"), 404
             db.execute("UPDATE meals SET day=?,slot=?,title=?,text=?,items=? WHERE id=? AND user_id=?",
                        (day, slot, title, text, json.dumps(items), meal_id, g.user["id"]))
+            db.execute("DELETE FROM meal_insights WHERE meal_id=?", (meal_id,))
             refresh_day(db, day)
             if old["day"] != day:
                 refresh_day(db, old["day"])
@@ -325,6 +319,7 @@ def create_app(config=None):
             if not row:
                 return jsonify(error="Repas introuvable"), 404
             db.execute("DELETE FROM meals WHERE id=? AND user_id=?", (meal_id, g.user["id"]))
+            db.execute("DELETE FROM meal_insights WHERE meal_id=?", (meal_id,))
             refresh_day(db, row["day"])
         return jsonify(ok=True)
 
@@ -375,34 +370,113 @@ def create_app(config=None):
             raise ValueError("Décris ton repas en quelques phrases")
         if limited("parse:" + g.user["id"], 30, 3600):
             return jsonify(error="Limite de 30 interprétations par heure atteinte"), 429
-        with store.connect() as db:
-            favorite_context = [{"name": r["title"], "items": [{"label": i["name"], "grams": i["grams"]} for i in json.loads(r["items"])]}
-                                for r in db.execute("SELECT * FROM favorites WHERE user_id=? LIMIT 20", (g.user["id"],))]
         try:
-            draft = plan.parse(text, favorite_context)
-            if not isinstance(draft, dict) or not isinstance(draft.get("items"), list) or not 1 <= len(draft["items"]) <= 40:
-                raise PlanError("Luna n'a pas fourni une liste d'aliments exploitable")
-            for item in draft["items"]:
-                if not isinstance(item, dict):
-                    raise PlanError("Luna a fourni un aliment invalide. Réessaie ou utilise la saisie manuelle.")
-                label = str(item.get("label", ""))[:150]
-                matches = search_foods(store, label, 5)
-                if not matches:
-                    # Keep cooking qualifiers when possible; explicit choices in the review UI.
-                    words = [w for w in normalize(label).split() if len(w) > 2]
-                    cooking = [w for w in words if w in ("cuit", "cru") and w not in words[:2]]
-                    matches = search_foods(store, " ".join(words[:2] + cooking), 5) if words else []
-                item["label"] = label
-                item["matches"] = matches
-                item["food_id"] = matches[0]["id"] if matches else None
-                if item.get("grams") is not None:
-                    item["grams"] = finite_number(item["grams"], 0.1, 10000, "Quantité proposée")
-                item["note"] = str(item.get("note", ""))[:300]
-                item["estimated"] = bool(item.get("estimated"))
-            draft["questions"] = [str(v)[:400] for v in draft.get("questions", [])][:10]
-            return jsonify(draft)
+            context = {"local_hour": datetime.now().hour}
+            return jsonify(prepare_draft(store, plan.parse(text, favorite_context(store, g.user["id"]), context), context))
         except requests.RequestException:
             raise PlanError("La connexion OpenAI est indisponible. Ton texte reste disponible.")
+
+    @app.post("/api/captures")
+    def capture():
+        payload = body()
+        day = valid_day(payload.get('day', date.today().isoformat()))
+        if day > date.today().isoformat():
+            raise ValueError('Les repas futurs ne sont pas inclus dans le journal')
+        text = str(payload.get('text', '')).strip()
+        request_id = str(payload.get('request_id', ''))
+        hint = payload.get('slot_hint') or None
+        if hint is not None and (not isinstance(hint, str) or hint not in SLOTS):
+            raise ValueError('Créneau invalide')
+        if len(text) > 4000 or not re.fullmatch(r'[a-zA-Z0-9_-]{16,100}', request_id):
+            raise ValueError('Envoi invalide')
+        if len(text) < 3:
+            raise ValueError('Écris ton repas en quelques mots')
+        signature = hashlib.sha256(json.dumps([day, hint, text]).encode()).hexdigest()
+        capture_id = str(uuid.uuid4())
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            old = db.execute('SELECT id,signature FROM captures WHERE user_id=? AND request_id=?', (g.user['id'], request_id)).fetchone()
+            if old:
+                if old['signature'] != signature:
+                    return jsonify(error='Cet envoi a déjà enregistré un autre contenu'), 409
+                return jsonify(id=old['id']), 202
+            if limited('parse:' + g.user['id'], 30, 3600):
+                return jsonify(error='Limite de 30 interprétations par heure atteinte'), 429
+            if db.execute("SELECT COUNT(*) FROM captures WHERE user_id=? AND status IN ('queued','analysing')", (g.user['id'],)).fetchone()[0] >= 3:
+                return jsonify(error='Trois repas sont déjà en cours. Attends quelques instants.'), 429
+            if not plan.status()['connected']:
+                raise PlanError('Connecte ton forfait ChatGPT avant de lancer Luna')
+            db.execute('INSERT INTO captures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (
+                capture_id, g.user['id'], day, hint, text, 'queued', None, None,
+                time.time(), time.time(), request_id, signature))
+        return jsonify(id=capture_id), 202
+
+    @app.get("/api/captures")
+    def capture_list():
+        day = valid_day(request.args.get('day', date.today().isoformat()))
+        with store.connect() as db:
+            jobs = [dict(row) for row in db.execute(
+                'SELECT id,day,status,meal_id,error,text,created,updated FROM captures WHERE user_id=? AND day=? ORDER BY created',
+                (g.user['id'], day))]
+        return jsonify(jobs=jobs)
+
+    @app.post("/api/captures/<capture_id>/retry")
+    def capture_retry(capture_id):
+        body()
+        if limited('parse:' + g.user['id'], 30, 3600):
+            return jsonify(error='Limite de 30 interprétations par heure atteinte'), 429
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT status FROM captures WHERE id=? AND user_id=?', (capture_id, g.user['id'])).fetchone()
+            if not row:
+                return jsonify(error='Envoi introuvable'), 404
+            if row[0] != 'failed':
+                return jsonify(error='Cet envoi ne peut pas être relancé'), 409
+            if db.execute("SELECT COUNT(*) FROM captures WHERE user_id=? AND status IN ('queued','analysing')", (g.user['id'],)).fetchone()[0] >= 3:
+                return jsonify(error='Attends la fin des repas en cours'), 429
+            db.execute("UPDATE captures SET status='queued',error=NULL,updated=? WHERE id=?", (time.time(), capture_id))
+        return jsonify(ok=True)
+
+    @app.delete("/api/captures/<capture_id>")
+    def cancel_capture(capture_id):
+        body()
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT status FROM captures WHERE id=? AND user_id=?', (capture_id, g.user['id'])).fetchone()
+            if not row:
+                return jsonify(error='Envoi introuvable'), 404
+            if row['status'] == 'done':
+                return jsonify(error='Le repas est déjà enregistré ; modifie-le depuis le journal'), 409
+            db.execute("UPDATE captures SET status='cancelled',updated=? WHERE id=?", (time.time(), capture_id))
+        return jsonify(ok=True)
+
+    @app.post("/api/meals/<meal_id>/refine")
+    def refine_meal(meal_id):
+        payload = body()
+        group_index = payload.get('group')
+        option_index = payload.get('option')
+        if any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in (group_index, option_index)):
+            raise ValueError('Choix invalide')
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            meal = db.execute('SELECT * FROM meals WHERE id=? AND user_id=?', (meal_id, g.user['id'])).fetchone()
+            info = db.execute('SELECT data FROM meal_insights WHERE meal_id=?', (meal_id,)).fetchone() if meal else None
+            if not meal or not info:
+                return jsonify(error='Cette précision n’est plus disponible. Le repas a été modifié.'), 409
+            groups = json.loads(info[0])
+            if group_index >= len(groups) or option_index >= len(groups[group_index]['options']):
+                raise ValueError('Choix invalide')
+            group = groups[group_index]
+            option = group['options'][option_index]
+            items = json.loads(meal['items'])
+            index = group['item_index']
+            items[index] = resolve_items(store, [{**items[index], **option, 'estimated': True,
+                'note': group['label'] + ' · ' + option['label']}])[0]
+            group['selected'] = option_index
+            db.execute('UPDATE meals SET items=? WHERE id=?', (json.dumps(items), meal_id))
+            db.execute('UPDATE meal_insights SET data=? WHERE meal_id=?', (json.dumps(groups), meal_id))
+            refresh_day(db, meal['day'])
+        return jsonify(ok=True)
 
     @app.post("/api/garmin/connect")
     def garmin_login():

@@ -37,8 +37,12 @@ const state = {
   editId: null,
   requestId: null,
   profile: null,
+  jobs: [],
+  slotHint: null,
 };
-let toastTimer, integrationTimer, dashboardTimer, previewTimer;
+let toastTimer, integrationTimer, dashboardTimer, previewTimer, captureTimer;
+let recognition = null,
+  dictationStopped = null;
 
 async function api(path, options = {}) {
   let response;
@@ -103,6 +107,9 @@ function showLogin() {
   $("meal-text").value = "";
   clearInterval(integrationTimer);
   clearInterval(dashboardTimer);
+  clearInterval(captureTimer);
+  state.jobs = [];
+  stopDictation();
 }
 async function showApp(user) {
   state.user = user;
@@ -119,6 +126,15 @@ async function showApp(user) {
   }, 15000);
   clearInterval(dashboardTimer);
   dashboardTimer = setInterval(refreshVisibleDashboard, 60000);
+  clearInterval(captureTimer);
+  captureTimer = setInterval(() => {
+    if (
+      state.user &&
+      !document.hidden &&
+      state.jobs.some((j) => ["queued", "analysing"].includes(j.status))
+    )
+      loadCaptures(true).catch(globalError);
+  }, 3000);
 }
 async function loadAll() {
   $("global-error").hidden = true;
@@ -130,6 +146,7 @@ async function loadAll() {
   ]);
   for (const result of results)
     if (result.status === "rejected") globalError(result.reason);
+  await loadCaptures(true).catch(globalError);
   if (state.view === "trends") await loadTrends().catch(globalError);
 }
 async function loadDashboard() {
@@ -274,6 +291,13 @@ function renderMeals() {
   );
   const mealMarkup = (m, expanded) =>
     `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · portions estimées" : ""}</p>${expanded ? m.items.map((i) => `<p>${escapeHTML(i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}<br>${escapeHTML(i.source)}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).length ? " · certaines valeurs non chiffrées" : ""}</p>`).join("") : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
+  const refinements = (meal) =>
+    (meal.clarifications || [])
+      .map(
+        (group, index) =>
+          `<div class="meal-refinement"><p><strong>${escapeHTML(group.label)}</strong> <span>Précision facultative</span></p><div class="choice-row">${group.options.map((option, oi) => `<button class="choice-button ${group.selected === oi ? "selected" : ""}" aria-pressed="${group.selected === oi}" data-refine-meal="${meal.id}" data-refine-group="${index}" data-refine-option="${oi}">${escapeHTML(option.label)}</button>`).join("")}</div></div>`,
+      )
+      .join("");
   const markup = (expanded) =>
     Object.entries(slots)
       .map(([slot, label]) => {
@@ -282,11 +306,39 @@ function renderMeals() {
         const kcal = group.some((meal) => meal.totals.kcal == null)
           ? null
           : group.reduce((sum, meal) => sum + meal.totals.kcal, 0);
-        return `<section class="meal-period" data-slot="${slot}" aria-label="Repas du créneau ${label}"><div class="section-head meal-period-header"><h3><span aria-hidden="true">${symbols[slot]}</span> ${label}${group.length ? `<small>${fmt(kcal)} kcal</small>` : ""}</h3><button class="text-button" data-action="new-meal" data-slot="${slot}" aria-label="Ajouter un repas · ${label}">Ajouter ＋</button></div>${group.length ? group.map((meal) => mealMarkup(meal, expanded)).join("") : '<p class="meal-period-empty">Aucun repas saisi.</p>'}</section>`;
+        return `<section class="meal-period" data-slot="${slot}" aria-label="Repas du créneau ${label}"><div class="section-head meal-period-header"><h3><span aria-hidden="true">${symbols[slot]}</span> ${label}${group.length ? `<small>${fmt(kcal)} kcal</small>` : ""}</h3><button class="text-button" data-action="new-meal" data-slot="${slot}" aria-label="Ajouter un repas · ${label}">Ajouter ＋</button></div>${group.length ? group.map((meal) => `<div class="meal-entry">${mealMarkup(meal, expanded)}${refinements(meal)}</div>`).join("") : '<p class="meal-period-empty">Aucun repas saisi.</p>'}</section>`;
       })
       .join("");
   $("today-meals").innerHTML = markup(false);
   $("journal-meals").innerHTML = markup(true);
+}
+async function loadCaptures(refresh = false) {
+  const selected = state.day;
+  const data = await api(`/api/captures?day=${selected}`);
+  if (!state.user || selected !== state.day) return;
+  const completed = new Set(
+    state.jobs.filter((j) => j.status === "done").map((j) => j.id),
+  );
+  const changed = data.jobs.some(
+    (j) => j.status === "done" && !completed.has(j.id),
+  );
+  state.jobs = data.jobs;
+  const markup = data.jobs
+    .filter((j) => ["queued", "analysing", "failed"].includes(j.status))
+    .map(
+      (j) =>
+        `<article class="capture-job ${j.status === "failed" ? "failed" : ""}"><div class="capture-job-head"><strong>${j.status === "failed" ? "Ce repas attend un nouvel essai" : j.status === "queued" ? "Repas reçu · en attente" : "Luna analyse ton repas…"}</strong>${j.status !== "failed" ? '<span class="loading-dot" aria-hidden="true"></span>' : ""}</div><p>${escapeHTML(j.status === "failed" ? j.error : j.text)}</p><div class="capture-job-actions">${j.status === "failed" ? `<button class="text-button" data-retry-capture="${j.id}">Réessayer ↗</button>` : ""}<button class="text-button" data-cancel-capture="${j.id}">${j.status === "failed" ? "Retirer cet envoi" : "Annuler"}</button></div></article>`,
+    )
+    .join("");
+  $("today-captures").innerHTML = markup;
+  $("journal-captures").innerHTML = markup;
+  if (refresh && changed) {
+    await loadDashboard();
+    if (state.view === "trends") await loadTrends();
+    toast(
+      "Repas enregistré. Les précisions éventuelles sont dans ton journal.",
+    );
+  }
 }
 function renderFavorites() {
   $("favorite-list").innerHTML =
@@ -325,12 +377,13 @@ function switchView(view) {
   if (view === "trends") loadTrends().catch(globalError);
   if (view === "profile") loadIntegrations().catch(globalError);
 }
-function changeDay(day) {
+async function changeDay(day) {
   if (day > today()) return;
   state.day = day;
   $("selected-day").value = day;
   $("next-day").disabled = day >= today();
-  loadDashboard().catch(globalError);
+  await loadDashboard().catch(globalError);
+  await loadCaptures(true).catch(globalError);
   if (state.view === "trends") loadTrends().catch(globalError);
 }
 function shiftDay(amount) {
@@ -365,9 +418,14 @@ function editableItem(item) {
   };
 }
 function openMeal(meal = null, duplicate = false, slot = null) {
+  abortDictation();
+  if (SpeechRecognition)
+    $("dictation-status").textContent =
+      "La dictée utilise le service vocal du navigateur. Seul le texte est envoyé à Luna.";
   state.editId = meal && !duplicate ? meal.id : null;
   state.requestId = crypto.randomUUID();
   state.draft = (meal?.items || []).map(editableItem);
+  state.slotHint = slot || meal?.slot || null;
   $("meal-form").reset();
   $("meal-text").value = meal?.text || "";
   $("meal-day").value = duplicate ? state.day : meal?.day || state.day;
@@ -383,11 +441,17 @@ function openMeal(meal = null, duplicate = false, slot = null) {
   $("meal-error").textContent = "";
   $("meal-questions").hidden = true;
   $("review-section").hidden = !state.draft.length;
+  $("meal-slot-field").hidden = !state.draft.length;
+  $("parse-meal").hidden = !!state.draft.length;
+  $("manual-meal").hidden = !!state.draft.length;
   $("parse-meal").disabled = !state.integrations?.chatgpt.connected;
   renderDraft();
   $("meal-dialog").showModal();
 }
 function addFood(food = null) {
+  $("meal-slot-field").hidden = false;
+  $("parse-meal").hidden = true;
+  $("manual-meal").hidden = true;
   state.draft.push({
     label: food?.name || "",
     food_id: food?.id || null,
@@ -467,25 +531,140 @@ function draftPayload() {
   };
 }
 async function parseMeal() {
+  await stopDictation();
   $("meal-error").textContent = "";
   const text = $("meal-text").value.trim();
   if (text.length < 3)
     throw new Error("Dicte ou écris ton repas dans le champ texte.");
-  const data = await api("/api/meals/parse", {
+  const day = $("meal-day").value;
+  const data = await api("/api/captures", {
     method: "POST",
-    body: { text },
+    body: {
+      text,
+      day,
+      slot_hint: state.slotHint,
+      request_id: state.requestId,
+    },
   });
-  state.draft = data.items.map(editableItem);
-  $("meal-title").value = data.title || "";
-  $("review-confirm").checked = false;
-  $("review-section").hidden = false;
-  $("meal-questions").hidden = !data.questions?.length;
-  $("meal-questions").textContent = (data.questions || []).join(" ");
-  renderDraft();
+  $("meal-dialog").close();
+  state.jobs.push({ id: data.id, status: "queued", text, day });
+  if (day !== state.day) await changeDay(day);
+  await loadCaptures(true).catch(globalError);
+  toast("Repas envoyé. Tu peux continuer pendant que Luna l’analyse.");
+}
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
+function resetDictationUI() {
+  $("meal-text").disabled = false;
+  $("dictate-meal").textContent = "🎙 Dicter mon repas";
+  $("dictate-meal").setAttribute("aria-pressed", "false");
+}
+function abortDictation() {
+  const current = recognition;
+  recognition = null;
+  if (current) current.abort();
+  resetDictationUI();
+}
+async function stopDictation() {
+  if (!recognition) return;
+  try {
+    recognition.stop();
+  } catch {
+    abortDictation();
+    return;
+  }
+  await Promise.race([
+    dictationStopped,
+    new Promise((resolve) => setTimeout(resolve, 2000)),
+  ]);
+  if (recognition) abortDictation();
+}
+$("dictate-meal").addEventListener("click", async () => {
+  if (recognition) {
+    await stopDictation();
+    return;
+  }
+  if (!SpeechRecognition) return;
+  const active = new SpeechRecognition();
+  recognition = active;
+  active.lang = "fr-FR";
+  active.continuous = true;
+  active.interimResults = true;
+  active.maxAlternatives = 1;
+  const prefix = $("meal-text").value.trim();
+  let hadError = false;
+  let finish;
+  const limit = setTimeout(() => {
+    if (recognition === active) stopDictation();
+  }, 90000);
+  dictationStopped = new Promise((resolve) => {
+    finish = resolve;
+  });
+  active.onstart = () => {
+    if (recognition !== active) return;
+    $("meal-text").disabled = true;
+    $("dictate-meal").textContent = "■ Arrêter la dictée";
+    $("dictate-meal").setAttribute("aria-pressed", "true");
+    $("dictation-status").textContent =
+      "Je t’écoute. Dis ton repas et son moment, puis envoie à Luna.";
+  };
+  active.onresult = (event) => {
+    if (recognition !== active) return;
+    const text = Array.from(
+      event.results,
+      (result) => result[0].transcript,
+    ).join(" ");
+    $("meal-text").value = [prefix, text]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 4000);
+  };
+  active.onerror = (event) => {
+    if (recognition !== active) return;
+    hadError = true;
+    $("dictation-status").textContent =
+      {
+        "not-allowed":
+          "Autorise le microphone pour MyMiam dans ton navigateur, puis réessaie.",
+        "audio-capture":
+          "Aucun microphone disponible. Vérifie le micro choisi dans ton navigateur.",
+        network:
+          "Le service de dictée du navigateur est indisponible. Ton texte est conservé.",
+        "no-speech": "Aucune parole détectée. Réessaie ou écris ton repas.",
+      }[event.error] ||
+      "La dictée s’est arrêtée. Ton texte est conservé ; tu peux réessayer.";
+  };
+  active.onend = () => {
+    clearTimeout(limit);
+    if (recognition === active) {
+      recognition = null;
+      resetDictationUI();
+      if (!hadError)
+        $("dictation-status").textContent =
+          "Dictée terminée. Tu peux ajuster le texte ou l’envoyer à Luna.";
+    }
+    finish();
+  };
+  try {
+    active.start();
+  } catch {
+    clearTimeout(limit);
+    recognition = null;
+    finish();
+    resetDictationUI();
+    $("dictation-status").textContent =
+      "La dictée n’a pas pu démarrer. Réessaie ou écris ton repas.";
+  }
+});
+$("meal-dialog").addEventListener("close", abortDictation);
+if (!SpeechRecognition) {
+  $("dictate-meal").disabled = true;
+  $("dictation-status").textContent =
+    "Ce navigateur ne propose pas la dictée intégrée. Utilise Chrome, le micro du clavier du téléphone ou le texte.";
 }
 function refreshVisibleDashboard() {
   if (state.user && !document.hidden && state.view === "today")
-    loadDashboard().catch(globalError);
+    Promise.all([loadDashboard(), loadCaptures(true)]).catch(globalError);
 }
 document.addEventListener("visibilitychange", refreshVisibleDashboard);
 async function loadDashboardHistory() {
@@ -701,6 +880,38 @@ document.addEventListener("click", async (event) => {
     if (button.dataset.view) switchView(button.dataset.view);
     if (button.dataset.action === "new-meal")
       openMeal(null, false, button.dataset.slot);
+    if (button.dataset.refineMeal) {
+      await busy(button, () =>
+        api(`/api/meals/${button.dataset.refineMeal}/refine`, {
+          method: "POST",
+          body: {
+            group: Number(button.dataset.refineGroup),
+            option: Number(button.dataset.refineOption),
+          },
+        }),
+      );
+      await loadDashboard();
+      if (state.view === "trends") await loadTrends();
+      toast("Estimation précisée. Le bilan est à jour.");
+    }
+    if (button.dataset.retryCapture) {
+      await busy(button, () =>
+        api(`/api/captures/${button.dataset.retryCapture}/retry`, {
+          method: "POST",
+          body: {},
+        }),
+      );
+      await loadCaptures();
+    }
+    if (button.dataset.cancelCapture) {
+      await busy(button, () =>
+        api(`/api/captures/${button.dataset.cancelCapture}`, {
+          method: "DELETE",
+          body: {},
+        }),
+      );
+      await loadCaptures();
+    }
     if (button.dataset.edit)
       openMeal(state.summary.meals.find((m) => m.id === button.dataset.edit));
     if (button.dataset.duplicate)
