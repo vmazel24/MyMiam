@@ -40,7 +40,7 @@ def create_app(config=None):
         app.config.update(config)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     store = Store(app.config["INSTANCE"])
-    plan = ChatGPTPlan(store.directory)
+    plan = ChatGPTPlan(store.directory, store)
     garmin = GarminConnector(store.directory)
     app.extensions.update(store=store, plan=plan, garmin=garmin)
     attempts, rate_lock = {}, threading.Lock()

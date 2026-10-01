@@ -16,7 +16,7 @@ with os.fdopen(fd, 'w') as lock:
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     with store.connect() as db:
         db.execute("UPDATE captures SET status='queued' WHERE status IN ('analysing')")
-    worker = CaptureWorker(store, ChatGPTPlan(store.directory))
+    worker = CaptureWorker(store, ChatGPTPlan(store.directory, store))
     last_cleanup = 0
     while True:
         if time.time() - last_cleanup > 300:

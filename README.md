@@ -111,6 +111,48 @@ systemctl --user enable --now mymiam-captures.service
 Le worker utilise un verrou exclusif, reprend les traitements interrompus au
 redémarrage et limite les doublons grâce aux identifiants d'envoi.
 
+## Skills et outils de Luna
+
+MyMiam charge explicitement deux skills du dépôt à chaque interprétation :
+
+- [`mymiam-meal-capture`](skills/mymiam-meal-capture/SKILL.md) : créneau, unités,
+  portions, hypothèses et choix facultatifs, sans question bloquante.
+- [`mymiam-food-catalogue`](skills/mymiam-food-catalogue/SKILL.md) : correspondances
+  alimentaires, provenance et valeurs inconnues.
+
+Le chargeur ne lit que ces deux chemins contrôlés. Les skills sont intégrés aux
+instructions de ce workflow ; il ne s'agit pas d'un upload de skill hébergé ni
+d'une installation dans le profil global de Codex.
+
+Luna dispose de deux fonctions locales, regroupées dans `nutrition` :
+`search_foods` recherche plusieurs aliments dans Ciqual et les produits Open Food
+Facts déjà enregistrés ; `calculate_portions` calcule les nutriments de portions
+à partir des résultats trouvés. Aucun accès système ou aux identifiants de compte
+n'est exposé. Garmin, objectifs et statistiques restent des calculs de MyMiam.
+
+La première étape requiert un appel d'outil ; normalement une recherche groupée
+puis la fiche finale suffisent. Au maximum trois étapes d'outils, six appels et
+une réponse finale sans outils. Les appels utilisent toujours Luna et le quota
+du forfait connecté, sans clé API ni repli payant. Le total des jetons et les noms
+d'outils sont consignés dans `instance/last_usage.json`, sans le récit ni les
+arguments. Une recherche locale peut nécessiter un échange supplémentaire avec
+Luna et consomme donc davantage du quota qu'une fiche sans recherche.
+
+Les identifiants retenus doivent avoir été retournés par les outils pour ce
+repas ; le serveur les vérifie puis recalcule les nutriments. Il conserve le choix
+fait par Luna entre les candidats, au lieu de prendre systématiquement le premier.
+Un aliment sans correspondance reste enregistré avec une composition inconnue.
+Les résultats d'outils ne sont traités qu'après un flux OpenAI terminé avec succès.
+L'historique nécessaire est transmis explicitement, avec le raisonnement chiffré,
+sans `previous_response_id` ni stockage distant demandé.
+
+Les plugins installés dans ChatGPT/Codex (par exemple Calorie Tracker) ne sont pas
+hérités par ces appels. La voie du forfait ne prend pas en charge les connecteurs
+MCP hébergés. Les fonctions locales sont le branchement utilisé dans MyMiam ;
+un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurement.
+[Limites officielles du forfait](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations),
+[protocole de fonctions](https://developers.openai.com/api/docs/guides/function-calling).
+
 ## Données et calculs
 
 - **Ciqual 2025**, Anses : 3 484 aliments, données par 100 g, Licence Ouverte 2.0.

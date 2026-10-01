@@ -6,33 +6,24 @@ from datetime import datetime, timezone
 
 import requests
 
-from .nutrition import NUTRIENTS, finite_number, normalize, resolve_items, search_foods
+from .nutrition import NUTRIENTS, finite_number, normalize, resolve_items, food_record
 from .openai_plan import PlanError
+from .catalogue import matches_for
 
 ACTIVE = ('queued', 'analysing')
 SLOTS = {'breakfast', 'lunch', 'dinner', 'snack'}
 
 
-def matches_for(store, label):
-    words = normalize(label).split()
-    # Ciqual ready-to-eat pizzas do not carry "cuite" in their names. Retain
-    # topping words, but discard generic description/portion words from Luna.
-    if words and words[0] in ('pizza', 'pizzas'):
-        neutral = {'garniture', 'non', 'precisee', 'precise', 'cuit', 'cuite', 'cuites',
-                   'entiere', 'entieres', 'moyenne', 'moyennes', 'petite', 'petites',
-                   'grande', 'grandes', 'taille', 'standard', 'type', 'classique',
-                   'ordinaire', 'generique', 'format'}
-        query = ' '.join(['pizza'] + [word for word in words[1:] if word not in neutral])
-        matches = [food for food in search_foods(store, query, 12)
-                   if normalize(food['name']).startswith('pizza ')]
-        if matches:
-            return matches[:5]
-    matches = search_foods(store, label, 5)
-    if not matches:
-        words = [word for word in normalize(label).split() if len(word) > 2]
-        cooking = [word for word in words if word in ('cuit', 'cru') and word not in words[:2]]
-        matches = search_foods(store, ' '.join(words[:2] + cooking), 5) if words else []
-    return matches
+def selected_matches(store, value, label):
+    if 'food_id' not in value:
+        return matches_for(store, label)  # Compatibility for pre-tool drafts.
+    if value['food_id'] is None:
+        return []
+    with store.connect() as db:
+        row = db.execute('SELECT * FROM foods WHERE id=?', (str(value['food_id']),)).fetchone()
+    if not row:
+        raise ValueError('Aliment du catalogue introuvable')
+    return [food_record(row)]
 
 
 def prepare_draft(store, draft, context=None):
@@ -44,7 +35,7 @@ def prepare_draft(store, draft, context=None):
         label = str(item.get('label', '')).strip()[:150]
         if not label:
             raise PlanError("Un aliment n'a pas été identifié.")
-        matches = matches_for(store, label)
+        matches = selected_matches(store, item, label)
         if not matches:
             # Save unknown composition as unknown, rather than inventing nutrients.
             food_id = 'unresolved:' + uuid.uuid4().hex
@@ -78,7 +69,7 @@ def prepare_draft(store, draft, context=None):
                 grams = finite_number(option.get('grams'), 0.1, 10000, 'Portion')
                 if not item['estimated'] and grams != item['grams']:
                     continue
-                foods = matches_for(store, str(option.get('food_label', ''))[:150])
+                foods = selected_matches(store, option, str(option.get('food_label', ''))[:150])
                 if not foods:
                     continue
                 value = {'label': str(option.get('label', 'Option'))[:80], 'food_id': foods[0]['id'], 'grams': grams}
@@ -86,6 +77,11 @@ def prepare_draft(store, draft, context=None):
                     options.append(value)
             except (ValueError, AttributeError):
                 continue
+        # Ensure ambiguous model labels still give clickable, distinct sizes.
+        labels = [normalize(value['label']) for value in options]
+        for value in options:
+            if labels.count(normalize(value['label'])) > 1:
+                value['label'] = value['label'][:55] + f" · {value['grams']:g} g"
         default = next((v for v in options if v['food_id'] == item['food_id'] and v['grams'] == item['grams']),
                        {'label': 'Estimation retenue', 'food_id': item['food_id'], 'grams': item['grams']})
         others = [v for v in options if (v['food_id'], v['grams']) != (default['food_id'], default['grams'])]
