@@ -19,9 +19,9 @@ const fmt = (value, decimals = 0) =>
         maximumFractionDigits: decimals,
       }).format(value);
 const slots = {
-  breakfast: "Petit déjeuner",
-  lunch: "Déjeuner",
-  dinner: "Dîner",
+  breakfast: "Matin",
+  lunch: "Midi",
+  dinner: "Soir",
   snack: "Collation",
 };
 const symbols = { breakfast: "☀", lunch: "◉", dinner: "☾", snack: "✧" };
@@ -216,7 +216,7 @@ function renderDashboard() {
   $("target-value").textContent = goal == null ? "—" : fmt(goal) + " kcal";
   $("deficit-value").textContent =
     s.deficit == null
-      ? "À compléter"
+      ? "—"
       : `${s.deficit >= 0 ? "−" : "+"}${fmt(Math.abs(s.deficit))} kcal`;
   const pct = goal && logged ? Math.round((s.intake.kcal / goal) * 100) : null;
   $("energy-pct").textContent =
@@ -236,8 +236,8 @@ function renderDashboard() {
   $("day-state").textContent = s.projected
     ? "Journée en cours"
     : s.complete
-      ? "Journal complet"
-      : "À compléter";
+      ? "Bilan actualisé"
+      : "Sans repas saisi";
   $("expenditure-note").textContent =
     ga?.has_data && ga.partial
       ? `Le total Garmin est provisoire. ${s.expenditure == null ? "Complète ton profil pour définir un objectif sur 24 h." : `Objectif basé sur une dépense projetée de ${fmt(s.expenditure)} kcal sur 24 h.`}`
@@ -253,9 +253,6 @@ function renderDashboard() {
       return `<article class="macro-card ${key}"><div class="macro-top">${name}</div><div class="macro-number">${fmt(value, 1)} <small>g</small></div><p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="4" rx="2"></rect></svg></article>`;
     })
     .join("");
-  $("complete-day").textContent = s.complete
-    ? "Rouvrir la journée"
-    : "Confirmer la journée";
   $("garmin-day").innerHTML = ga?.has_data
     ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total ${ga.partial ? "observé jusqu’ici" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Calories actives, déjà incluses</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Repos ${ga.partial ? "accumulé" : "Garmin"}</span></div></div><p class="muted footnote">${ga.partial ? "Données provisoires : l’objectif sur 24 h vient de ton profil." : "Le total Garmin prend le relais de l’estimation du profil."} Synchronisation automatique chaque heure. Dernière mise à jour : ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
     : `<p class="muted">Aucune donnée Garmin pour cette journée. ${state.integrations?.garmin?.connected ? "Tu peux lancer une synchronisation depuis ton profil." : "Connecte Garmin depuis ton profil pour suivre ta dépense."}</p>`;
@@ -275,15 +272,19 @@ function renderMeals() {
     (a, b) =>
       Object.keys(slots).indexOf(a.slot) - Object.keys(slots).indexOf(b.slot),
   );
-  const empty =
-    '<div class="empty-state"><strong>Ton journal commence ici.</strong><p>Raconte ton premier repas ou ajoute un aliment.</p><button class="ghost-button" data-action="new-meal">Ajouter mon repas ＋</button></div>';
+  const mealMarkup = (m, expanded) =>
+    `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · portions estimées" : ""}</p>${expanded ? m.items.map((i) => `<p>${escapeHTML(i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}<br>${escapeHTML(i.source)}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).length ? " · certaines valeurs non chiffrées" : ""}</p>`).join("") : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
   const markup = (expanded) =>
-    meals
-      .map(
-        (m) =>
-          `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · portions estimées" : ""}</p>${expanded ? m.items.map((i) => `<p>${escapeHTML(i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}<br>${escapeHTML(i.source)}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).length ? " · certaines valeurs non chiffrées" : ""}</p>`).join("") : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`,
-      )
-      .join("") || empty;
+    Object.entries(slots)
+      .map(([slot, label]) => {
+        const group = meals.filter((meal) => meal.slot === slot);
+        if (slot === "snack" && !group.length) return "";
+        const kcal = group.some((meal) => meal.totals.kcal == null)
+          ? null
+          : group.reduce((sum, meal) => sum + meal.totals.kcal, 0);
+        return `<section class="meal-period" data-slot="${slot}" aria-label="Repas du créneau ${label}"><div class="section-head meal-period-header"><h3><span aria-hidden="true">${symbols[slot]}</span> ${label}${group.length ? `<small>${fmt(kcal)} kcal</small>` : ""}</h3><button class="text-button" data-action="new-meal" data-slot="${slot}" aria-label="Ajouter un repas · ${label}">Ajouter ＋</button></div>${group.length ? group.map((meal) => mealMarkup(meal, expanded)).join("") : '<p class="meal-period-empty">Aucun repas saisi.</p>'}</section>`;
+      })
+      .join("");
   $("today-meals").innerHTML = markup(false);
   $("journal-meals").innerHTML = markup(true);
 }
@@ -363,14 +364,18 @@ function editableItem(item) {
     matches: item.matches || [],
   };
 }
-function openMeal(meal = null, duplicate = false) {
+function openMeal(meal = null, duplicate = false, slot = null) {
   state.editId = meal && !duplicate ? meal.id : null;
   state.requestId = crypto.randomUUID();
   state.draft = (meal?.items || []).map(editableItem);
   $("meal-form").reset();
   $("meal-text").value = meal?.text || "";
   $("meal-day").value = duplicate ? state.day : meal?.day || state.day;
-  $("meal-slot").value = meal?.slot || "lunch";
+  const hour = new Date().getHours();
+  $("meal-slot").value =
+    meal?.slot ||
+    slot ||
+    (hour < 11 ? "breakfast" : hour < 17 ? "lunch" : "dinner");
   $("meal-title").value = meal?.title || "";
   $("meal-dialog-title").textContent = state.editId
     ? "Ajuste ton repas"
@@ -521,7 +526,7 @@ function deficitChart(days, cumulative) {
   });
   const known = values.filter((v) => v != null);
   if (!known.length)
-    return '<div class="empty-state chart-empty"><p>Ton premier bilan apparaîtra après une journée passée confirmée complète.</p></div>';
+    return '<div class="empty-state chart-empty"><p>Ton premier bilan apparaîtra après une journée passée avec des repas saisis.</p></div>';
   const width = 500,
     height = 220,
     left = 48,
@@ -592,19 +597,19 @@ async function loadTrends() {
       "kcal",
       data.covered_days
         ? "Les surplus réduisent ce cumul."
-        : "Aucune journée complète passée.",
+        : "Aucune journée passée renseignée.",
     ],
     [
       "Couverture du suivi",
       `${data.covered_days} / ${data.elapsed_days}`,
       "jours",
-      "Journées complètes avec bilan calculable.",
+      "Journées renseignées avec bilan calculable.",
     ],
     [
       "Apports moyens",
       fmt(intake),
       "kcal / jour",
-      "Calculés sur les journées complètes.",
+      "Calculés sur les journées renseignées.",
     ],
   ]
     .map(
@@ -618,7 +623,7 @@ async function loadTrends() {
     .reverse()
     .map(
       (d) =>
-        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? fmt(d.deficit) : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.complete ? "Complet" : "À compléter"}</span></td></tr>`,
+        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? fmt(d.deficit) : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.projected ? "Provisoire" : d.complete ? "Actualisé" : "Sans repas"}</span></td></tr>`,
     )
     .join("");
 }
@@ -656,7 +661,7 @@ function renderEnergyChart(days) {
     ]) {
       if (value == null) continue;
       const h = (value / max) * plot;
-      svg += `<rect class="${kind}-bar" x="${x + shift}" y="${top + plot - h}" width="${bar}" height="${h}" rx="2" ${d.complete ? "" : 'opacity="0.5"'}><title>${d.day} · ${kind === "intake" ? "Apports" : "Dépense"} : ${fmt(value)} kcal${d.complete ? "" : " · journée incomplète"}</title></rect>`;
+      svg += `<rect class="${kind}-bar" x="${x + shift}" y="${top + plot - h}" width="${bar}" height="${h}" rx="2" ${d.complete ? "" : 'opacity="0.5"'}><title>${d.day} · ${kind === "intake" ? "Apports" : "Dépense"} : ${fmt(value)} kcal${d.complete ? "" : " · sans repas saisi"}</title></rect>`;
     }
     if (i % Math.max(1, Math.floor(days.length / 7)) === 0)
       svg += `<text x="${x}" y="${height - 6}">${d.day.slice(8)}/${d.day.slice(5, 7)}</text>`;
@@ -694,7 +699,8 @@ document.addEventListener("click", async (event) => {
   if (!button) return;
   try {
     if (button.dataset.view) switchView(button.dataset.view);
-    if (button.dataset.action === "new-meal") openMeal();
+    if (button.dataset.action === "new-meal")
+      openMeal(null, false, button.dataset.slot);
     if (button.dataset.edit)
       openMeal(state.summary.meals.find((m) => m.id === button.dataset.edit));
     if (button.dataset.duplicate)
@@ -880,32 +886,6 @@ $("barcode-food").addEventListener("click", async () => {
     addFood(data.food);
   } catch (error) {
     $("meal-error").textContent = error.message;
-  }
-});
-$("complete-day").addEventListener("click", async () => {
-  try {
-    if (
-      !state.summary.complete &&
-      !state.summary.has_meals &&
-      !confirm(
-        "Aucun repas n’est saisi. Confirmer signifie que tu n’as rien consommé ce jour-là. Confirmer cette journée ?",
-      )
-    )
-      return;
-    await busy($("complete-day"), () =>
-      api("/api/day", {
-        method: "PUT",
-        body: { day: state.day, complete: !state.summary.complete },
-      }),
-    );
-    await loadDashboard();
-    toast(
-      state.summary.complete
-        ? "Journal de la journée confirmé."
-        : "Journée remise à compléter.",
-    );
-  } catch (error) {
-    globalError(error);
   }
 });
 $("profile-form").addEventListener("submit", async (event) => {

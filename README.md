@@ -94,15 +94,19 @@ Documentation : [enregistrement](https://developers.openai.com/siwc/token-sharin
   l'estimation du profil ; ne pas ajouter les activités à nouveau. Aujourd'hui,
   le total Garmin est accumulé et affiché séparément de la projection sur 24 h.
 - Le déficit est signé (`dépense − apports`) ; les surplus réduisent le cumul.
-  Le cumul porte sur les jours passés explicitement confirmés complets avec une
-  énergie calculable. Zéro repas sans confirmation signifie une journée inconnue.
-  Modifier un repas rouvre la journée. Les paramètres du profil sont conservés
-  au moment de la confirmation, pour stabiliser l'historique des objectifs.
+  Le cumul porte automatiquement sur les jours passés avec au moins un repas
+  et une énergie calculable. Aucune confirmation de journée n'est nécessaire.
+  Ajouter, modifier, déplacer ou supprimer un repas recalcule les bilans.
+  Sans repas saisi, une journée reste inconnue. Les paramètres du profil sont
+  conservés lors de la saisie pour stabiliser les objectifs historiques ; les
+  objectifs d'aujourd'hui restent modifiables avec le profil.
 - Le Dashboard affiche le déficit journalier et son cumul sur 7, 30 ou 90 jours.
   Les journées manquantes interrompent les graphiques ; aujourd'hui est exclu
-  des bilans définitifs. Sans repas saisi ni confirmation de la journée, les
+  des bilans définitifs. Sans repas saisi, les
   apports restent affichés inconnus. Le total Garmin observé est présenté
   séparément de l'objectif calculé sur une journée de 24 heures.
+  Le journal est organisé en Matin, Midi et Soir, avec ajout direct dans chaque
+  créneau ; les collations restent disponibles dans le formulaire de repas.
 - Les repas favoris servent aussi de recettes personnelles. Les exports JSON
   contiennent les données du journal et aucun identifiant de connexion.
 
@@ -129,7 +133,7 @@ node --check static/app.js
 ```
 
 Les tests vérifient l'authentification, les origines, l'isolation, les quantités,
-les inconnues nutritionnelles, l'idempotence, les journées complètes et le comptage
+les inconnues nutritionnelles, l'idempotence, les bilans automatiques et le comptage
 Garmin. Les tests navigateur utilisent des réponses simulées distinctes de toute
 donnée personnelle ; les connexions réelles restent à valider par le propriétaire.
 

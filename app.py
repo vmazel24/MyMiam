@@ -235,6 +235,8 @@ def create_app(config=None):
         with store.connect() as db:
             db.execute("INSERT OR REPLACE INTO profiles VALUES (?,?)", (g.user["id"], json.dumps(payload)))
             db.execute("INSERT OR REPLACE INTO weights VALUES (?,?,?)", (g.user["id"], date.today().isoformat(), payload["weight"]))
+            db.execute("UPDATE days SET goal=? WHERE user_id=? AND day=?",
+                       (json.dumps(payload), g.user["id"], date.today().isoformat()))
         return jsonify(profile=payload)
 
     @app.post("/api/weights")
@@ -258,17 +260,17 @@ def create_app(config=None):
         count = int(finite_number(request.args.get("days", 30), 7, 366, "Période"))
         return jsonify(trends(store, g.user["id"], day, count))
 
-    @app.put("/api/day")
-    def day_complete():
-        payload = body()
-        day = valid_day(payload.get("day"))
-        if day > date.today().isoformat() or not isinstance(payload.get("complete"), bool):
-            raise ValueError("Journée invalide")
-        with store.connect() as db:
-            row = db.execute("SELECT data FROM profiles WHERE user_id=?", (g.user["id"],)).fetchone()
-            db.execute("INSERT INTO days VALUES (?,?,?,?) ON CONFLICT(user_id,day) DO UPDATE SET complete=excluded.complete,goal=excluded.goal",
-                       (g.user["id"], day, int(payload["complete"]), row[0] if row else None))
-        return jsonify(ok=True)
+    def refresh_day(db, day):
+        """Include logged meals automatically and preserve historical goals."""
+        user_id = g.user["id"]
+        profile = db.execute("SELECT data FROM profiles WHERE user_id=?", (user_id,)).fetchone()
+        logged = db.execute("SELECT EXISTS(SELECT 1 FROM meals WHERE user_id=? AND day=?)",
+                            (user_id, day)).fetchone()[0]
+        goal = profile[0] if profile else None
+        db.execute("""INSERT INTO days VALUES (?,?,?,?)
+                      ON CONFLICT(user_id,day) DO UPDATE SET complete=excluded.complete,
+                      goal=CASE WHEN excluded.day=? THEN excluded.goal ELSE COALESCE(days.goal,excluded.goal) END""",
+                   (user_id, day, logged, goal, date.today().isoformat()))
 
     def meal_fields(payload):
         day = valid_day(payload.get("day"))
@@ -299,7 +301,7 @@ def create_app(config=None):
             row = db.execute("SELECT * FROM meals WHERE user_id=? AND request_id=?", (g.user["id"], request_id)).fetchone()
             if (row["day"], row["slot"], row["title"], row["text"], json.loads(row["items"])) != (day, slot, title, text, items):
                 return jsonify(error="Cet identifiant a déjà enregistré un autre repas"), 409
-            db.execute("UPDATE days SET complete=0 WHERE user_id=? AND day=?", (g.user["id"], day))
+            refresh_day(db, day)
         return jsonify(id=row["id"]), 201
 
     @app.put("/api/meals/<meal_id>")
@@ -311,7 +313,9 @@ def create_app(config=None):
                 return jsonify(error="Repas introuvable"), 404
             db.execute("UPDATE meals SET day=?,slot=?,title=?,text=?,items=? WHERE id=? AND user_id=?",
                        (day, slot, title, text, json.dumps(items), meal_id, g.user["id"]))
-            db.execute("UPDATE days SET complete=0 WHERE user_id=? AND day IN (?,?)", (g.user["id"], day, old["day"]))
+            refresh_day(db, day)
+            if old["day"] != day:
+                refresh_day(db, old["day"])
         return jsonify(ok=True)
 
     @app.delete("/api/meals/<meal_id>")
@@ -321,7 +325,7 @@ def create_app(config=None):
             if not row:
                 return jsonify(error="Repas introuvable"), 404
             db.execute("DELETE FROM meals WHERE id=? AND user_id=?", (meal_id, g.user["id"]))
-            db.execute("UPDATE days SET complete=0 WHERE user_id=? AND day=?", (g.user["id"], row["day"]))
+            refresh_day(db, row["day"])
         return jsonify(ok=True)
 
     @app.get("/api/favorites")

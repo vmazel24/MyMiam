@@ -14,8 +14,7 @@ const food = {
 
 test.beforeEach(async ({ page }) => {
   let logged = false,
-    meals = [],
-    complete = false;
+    meals = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url()),
       path = url.pathname;
@@ -88,14 +87,11 @@ test.beforeEach(async ({ page }) => {
         totals: item.nutrients,
       });
       data = { id: "meal-demo" };
-    } else if (path === "/api/day") {
-      complete = route.request().postDataJSON().complete;
-      data = { ok: true };
     } else if (path === "/api/dashboard")
       data = {
         day: url.searchParams.get("day"),
         meals,
-        complete,
+        complete: !!meals.length,
         has_meals: !!meals.length,
         intake: meals.length
           ? meals[0].totals
@@ -129,14 +125,13 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#app")).toBeVisible();
 });
 
-test("dictated text, Luna review, edit quantity, save and confirm day", async ({
+test("dictated text, Luna review and saving directly in the midday journal", async ({
   page,
 }, info) => {
   await page
-    .locator("#view-today")
-    .getByRole("button", { name: "Ajouter mon repas" })
-    .first()
+    .getByRole("button", { name: "Ajouter un repas · Midi", exact: true })
     .click();
+  await expect(page.locator("#meal-slot")).toHaveValue("lunch");
   await page.locator("#meal-text").fill("200 grammes de riz blanc cuit");
   await page.getByRole("button", { name: "Préparer avec Luna" }).click();
   await expect(page.locator("#meal-questions")).toContainText(
@@ -151,10 +146,11 @@ test("dictated text, Luna review, edit quantity, save and confirm day", async ({
   await expect(page.locator("#meal-dialog")).not.toBeVisible();
   await expect(page.locator("#intake-kcal")).toContainText("325");
   await expect(page.locator("#today-meals")).toContainText("Mon déjeuner");
-  await page.getByRole("button", { name: "Confirmer la journée" }).click();
   await expect(
-    page.getByRole("button", { name: "Rouvrir la journée" }),
-  ).toBeVisible();
+    page.locator('#today-meals .meal-period[data-slot="lunch"]'),
+  ).toContainText("325");
+  await expect(page.locator("#complete-day")).toHaveCount(0);
+  await expect(page.locator("#today-meals .meal-period")).toHaveCount(3);
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth + 1,
   );
@@ -164,6 +160,23 @@ test("dictated text, Luna review, edit quantity, save and confirm day", async ({
     path: info.outputPath("dashboard.png"),
     fullPage: true,
   });
+});
+
+test("morning midday and evening buttons select their meal period", async ({
+  page,
+}) => {
+  for (const [label, value] of [
+    ["Matin", "breakfast"],
+    ["Midi", "lunch"],
+    ["Soir", "dinner"],
+  ]) {
+    await page
+      .getByRole("button", { name: `Ajouter un repas · ${label}`, exact: true })
+      .click();
+    await expect(page.locator("#meal-slot")).toHaveValue(value);
+    await page.locator("#close-meal").click();
+  }
+  await expect(page.locator("#complete-day")).toHaveCount(0);
 });
 
 test("manual food search and saving without an AI request", async ({

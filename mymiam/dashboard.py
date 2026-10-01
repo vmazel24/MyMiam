@@ -17,9 +17,11 @@ def summary(store, user_id, day):
             meal["totals"] = totals(meal["items"])
             meals.append(meal)
         row = db.execute("SELECT * FROM days WHERE user_id=? AND day=?", (user_id, day)).fetchone()
-        complete = bool(row and row["complete"])
-        # Day snapshot makes cumulative goals stable after later profile edits.
-        if row and row["goal"]:
+        # No confirmation step: every logged meal contributes immediately,
+        # including meals saved before automatic journals were introduced.
+        complete = bool(meals)
+        # Past-day snapshots keep goals stable; today's profile remains editable.
+        if day < today and row and row["goal"]:
             profile = json.loads(row["goal"])
         row = db.execute("SELECT data FROM garmin_days WHERE user_id=? AND day=?", (user_id, day)).fetchone()
         garmin = json.loads(row[0]) if row else None
@@ -45,7 +47,7 @@ def summary(store, user_id, day):
 def trends(store, user_id, end_day, count=30):
     end = date.fromisoformat(end_day)
     days = [summary(store, user_id, (end - timedelta(days=i)).isoformat()) for i in range(count - 1, -1, -1)]
-    # Today is still provisional even when the user has marked their journal complete.
+    # Today's balance remains provisional and is excluded from historical totals.
     included = [d for d in days if d["day"] < date.today().isoformat() and d["deficit"] is not None]
     with store.connect() as db:
         weights = [dict(row) for row in db.execute("SELECT day,weight FROM weights WHERE user_id=? AND day BETWEEN ? AND ? ORDER BY day",

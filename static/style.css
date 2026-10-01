@@ -633,25 +633,32 @@ p + p {
 .empty-state button {
   margin-top: 16px;
 }
-.day-confirm {
+.meal-period {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.meal-period-header {
+  margin-bottom: 10px;
+}
+.meal-period-header h3 {
+  font: 700 24px var(--display);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 22px;
-  margin-top: 18px;
-  padding: 15px 3px;
+  gap: 10px;
 }
-.day-confirm strong {
-  font-size: 12px;
+.meal-period-header h3 small {
+  font:
+    11px "Avenir Next",
+    sans-serif;
+  color: var(--muted);
 }
-.day-confirm p {
-  font-size: 10px;
-  margin-top: 3px;
+.meal-period .meal-card + .meal-card {
+  margin-top: 10px;
 }
-.day-confirm button {
-  white-space: nowrap;
-  min-height: 36px;
-  font-size: 10px;
+.meal-period-empty {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 8px 0 12px;
 }
 .activity-values {
   display: flex;
@@ -1324,14 +1331,6 @@ dialog::backdrop {
   .meal-actions button {
     font-size: 14px;
     padding: 3px;
-  }
-  .day-confirm {
-    align-items: flex-start;
-  }
-  .day-confirm button {
-    max-width: 120px;
-    white-space: normal;
-    padding: 10px;
   }
   .panel {
     padding: 18px;

@@ -51,9 +51,6 @@ class CoreTests(unittest.TestCase):
         payload.update(changes)
         return self.client.post("/api/meals",json=payload,headers=self.headers)
 
-    def complete(self, day=None):
-        return self.client.put("/api/day",json={"day":day or self.day,"complete":True},headers=self.headers)
-
     def test_private_routes_require_session(self):
         self.client.delete_cookie("mymiam_session")
         for path in ("/api/dashboard","/api/profile","/api/integrations","/api/export","/api/favorites"):
@@ -116,7 +113,7 @@ class CoreTests(unittest.TestCase):
     def test_missing_nutrients_not_silently_zero(self):
         with self.store.connect() as db:
             db.execute("UPDATE foods SET nutrients=? WHERE id='ciqual:rice'",(json.dumps({"kcal":None,"protein":None,"carbs":20,"fat":2,"fiber":1}),))
-        self.meal();self.complete()
+        self.meal()
         day=summary(self.store,self.user['id'],self.day)
         self.assertIsNone(day['intake']['kcal'])
         self.assertIsNone(day['deficit'])
@@ -128,16 +125,48 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(data['cumulative_deficit'],0)
 
     def test_surplus_reduces_cumulative_deficit(self):
-        self.meal(items=[{"food_id":"ciqual:rice","grams":3000}]);self.complete()
+        self.meal(items=[{"food_id":"ciqual:rice","grams":3000}])
         data=trends(self.store,self.user['id'],self.day)
         self.assertLess(data['cumulative_deficit'],0)
         self.assertEqual(data['covered_days'],1)
 
-    def test_meal_change_reopens_completed_day(self):
-        response=self.meal();self.complete()
+    def test_deleting_last_meal_removes_day_from_history(self):
+        response=self.meal()
         self.assertTrue(summary(self.store,self.user['id'],self.day)['complete'])
         self.client.delete('/api/meals/'+response.json['id'],json={},headers=self.headers)
         self.assertFalse(summary(self.store,self.user['id'],self.day)['complete'])
+        self.assertIsNone(summary(self.store,self.user['id'],self.day)['deficit'])
+        self.assertEqual(trends(self.store,self.user['id'],self.day)['covered_days'],0)
+
+    def test_add_edit_delete_recalculates_history_without_confirmation(self):
+        first=self.meal()
+        before=trends(self.store,self.user['id'],self.day)['cumulative_deficit']
+        second=self.meal(request_id='another_request_1234567890')
+        self.assertEqual(trends(self.store,self.user['id'],self.day)['cumulative_deficit'],before-260)
+        meal=summary(self.store,self.user['id'],self.day)['meals'][0]
+        edited=self.client.put('/api/meals/'+first.json['id'],json={
+            **meal,'items':[{'food_id':'ciqual:rice','grams':100}]},headers=self.headers)
+        self.assertEqual(edited.status_code,200)
+        self.assertEqual(trends(self.store,self.user['id'],self.day)['cumulative_deficit'],before-130)
+        self.client.delete('/api/meals/'+second.json['id'],json={},headers=self.headers)
+        self.assertEqual(trends(self.store,self.user['id'],self.day)['cumulative_deficit'],before+130)
+
+    def test_existing_unconfirmed_meals_are_included_automatically(self):
+        self.meal()
+        with self.store.connect() as db:
+            db.execute('UPDATE days SET complete=0 WHERE user_id=?',(self.user['id'],))
+        self.assertEqual(trends(self.store,self.user['id'],self.day)['covered_days'],1)
+
+    def test_moving_meal_recalculates_both_days(self):
+        result=self.meal()
+        moved=(date.fromisoformat(self.day)-timedelta(days=1)).isoformat()
+        meal=summary(self.store,self.user['id'],self.day)['meals'][0]
+        response=self.client.put('/api/meals/'+result.json['id'],json={
+            **meal,'day':moved,'items':[{'food_id':'ciqual:rice','grams':200}]},headers=self.headers)
+        self.assertEqual(response.status_code,200)
+        self.assertIsNone(summary(self.store,self.user['id'],self.day)['deficit'])
+        self.assertIsNotNone(summary(self.store,self.user['id'],moved)['deficit'])
+        self.assertEqual(trends(self.store,self.user['id'],self.day)['covered_days'],1)
 
     def test_other_user_cannot_delete_owner_meal(self):
         response=self.meal()
@@ -160,15 +189,22 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(result['garmin']['partial'])
         self.assertEqual(result['expenditure'],round(result['resting']*1.4))
 
-    def test_today_excluded_from_cumulative_even_confirmed(self):
-        self.meal(day=date.today().isoformat());self.complete(date.today().isoformat())
+    def test_today_excluded_from_cumulative_automatically(self):
+        self.meal(day=date.today().isoformat())
         self.assertEqual(trends(self.store,self.user['id'],date.today().isoformat())['covered_days'],0)
 
-    def test_profile_change_preserves_confirmed_day_targets(self):
-        self.meal();self.complete()
+    def test_profile_change_preserves_logged_past_day_targets(self):
+        self.meal()
         before=summary(self.store,self.user['id'],self.day)['targets']
         self.client.put('/api/profile',json={**self.profile,'deficit':500,'activity_factor':1.8},headers=self.headers)
         self.assertEqual(summary(self.store,self.user['id'],self.day)['targets'],before)
+
+    def test_today_profile_changes_apply_without_freezing_goals(self):
+        day=date.today().isoformat()
+        self.meal(day=day)
+        before=summary(self.store,self.user['id'],day)['targets']['kcal']
+        self.client.put('/api/profile',json={**self.profile,'deficit':500},headers=self.headers)
+        self.assertEqual(summary(self.store,self.user['id'],day)['targets']['kcal'],before-250)
 
     def test_profile_macro_percentages_must_sum_to_100(self):
         self.assertEqual(self.client.put('/api/profile',json={**self.profile,'protein_pct':60},headers=self.headers).status_code,400)

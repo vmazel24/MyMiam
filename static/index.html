@@ -118,7 +118,7 @@
             <article class="energy-card">
               <div class="section-head">
                 <p class="eyebrow">MON BILAN DU JOUR</p>
-                <span class="dark-pill" id="day-state">À compléter</span>
+                <span class="dark-pill" id="day-state">Journée en cours</span>
               </div>
               <div class="energy-main">
                 <div>
@@ -234,9 +234,9 @@
             </article>
           </div>
           <p class="footnote muted">
-            Seuls les jours passés confirmés complets avec un bilan calculable
-            entrent dans ces graphiques. Les jours manquants restent visibles
-            comme des interruptions.
+            Les jours passés avec des repas saisis et un bilan calculable sont
+            inclus automatiquement. Chaque modification met les graphiques à
+            jour. Les jours sans repas restent sans données.
           </p>
           <div class="section-head spaced">
             <div>
@@ -248,18 +248,6 @@
             </button>
           </div>
           <div id="today-meals" class="meal-list"></div>
-          <div class="day-confirm">
-            <div>
-              <strong>Tout est dans le journal ?</strong>
-              <p class="muted">
-                Confirme la journée pour l’inclure dans tes tendances. Une
-                modification la remet à compléter.
-              </p>
-            </div>
-            <button id="complete-day" class="ghost-button">
-              Confirmer la journée
-            </button>
-          </div>
           <div class="section-head spaced">
             <div>
               <p class="eyebrow">BOUGER & DÉPENSER</p>
@@ -285,7 +273,8 @@
         <section id="view-trends" class="view" hidden>
           <div class="section-head">
             <p class="muted">
-              Les jours complets donnent du sens aux chiffres.
+              Tes repas sont inclus automatiquement, sans confirmation de
+              journée.
             </p>
             <label
               >Période<select id="trend-period">
@@ -307,7 +296,7 @@
             <div id="trend-chart" class="chart"></div>
             <p class="muted footnote">
               Un jour sans repas saisi reste inconnu. Le cumul inclut les
-              déficits et les surplus des jours complets passés.
+              déficits et les surplus des jours passés renseignés.
             </p>
           </article>
           <article class="panel spaced">
@@ -584,9 +573,9 @@
         <div class="form-grid">
           <label
             >Repas<select id="meal-slot">
-              <option value="breakfast">Petit déjeuner</option>
-              <option value="lunch" selected>Déjeuner</option>
-              <option value="dinner">Dîner</option>
+              <option value="breakfast">Matin</option>
+              <option value="lunch" selected>Midi</option>
+              <option value="dinner">Soir</option>
               <option value="snack">Collation</option>
             </select></label
           ><label>Date<input type="date" id="meal-day" required /></label>
