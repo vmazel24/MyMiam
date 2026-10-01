@@ -1,0 +1,19 @@
+[Unit]
+Description=MyMiam personal nutrition dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/vmzl/Documents/MyMiam
+Environment=MYMIAM_ORIGIN=https://mymiam.176-159-167-168.sslip.io
+Environment=MYMIAM_SECURE_COOKIES=1
+Environment=TZ=Europe/Paris
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+ExecStart=/home/vmzl/Documents/MyMiam/.venv/bin/gunicorn --bind 127.0.0.1:8092 --workers 1 --threads 8 --timeout 180 app:app
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

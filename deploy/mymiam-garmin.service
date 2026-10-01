@@ -1,0 +1,10 @@
+[Unit]
+Description=Update MyMiam Garmin daily statistics
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/vmzl/Documents/MyMiam
+Environment=TZ=Europe/Paris
+UMask=0077
+ExecStart=/home/vmzl/Documents/MyMiam/.venv/bin/python scripts/sync_garmin.py
+NoNewPrivileges=true

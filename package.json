@@ -1,0 +1,12 @@
+{
+  "name": "mymiam",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "prettier": "^3.9.9"
+  }
+}

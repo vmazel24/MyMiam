@@ -1,0 +1,909 @@
+"use strict";
+const $ = (id) => document.getElementById(id);
+const escapeHTML = (value) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const fmt = (value, decimals = 0) =>
+  value == null
+    ? "—"
+    : new Intl.NumberFormat("fr-FR", {
+        maximumFractionDigits: decimals,
+      }).format(value);
+const slots = {
+  breakfast: "Petit déjeuner",
+  lunch: "Déjeuner",
+  dinner: "Dîner",
+  snack: "Collation",
+};
+const symbols = { breakfast: "☀", lunch: "◉", dinner: "☾", snack: "✧" };
+const macroNames = { protein: "Protéines", carbs: "Glucides", fat: "Lipides" };
+const state = {
+  user: null,
+  view: "today",
+  day: today(),
+  summary: null,
+  favorites: [],
+  integrations: null,
+  draft: [],
+  editId: null,
+  requestId: null,
+  profile: null,
+};
+let toastTimer, integrationTimer, previewTimer;
+
+async function api(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(path, {
+      credentials: "same-origin",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+      ...(options.body === undefined
+        ? {}
+        : { body: JSON.stringify(options.body) }),
+    });
+  } catch {
+    throw new Error(
+      "Connexion indisponible. Ton brouillon reste ouvert ; réessaie quand le réseau revient.",
+    );
+  }
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && !path.startsWith("/api/auth/")) {
+    showLogin();
+    throw new Error("Ta session a expiré. Reconnecte-toi à Renfo.");
+  }
+  if (!response.ok)
+    throw new Error(data.error || "Cette opération n’a pas abouti. Réessaie.");
+  return data;
+}
+function toast(message) {
+  $("toast").textContent = message;
+  $("toast").hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ($("toast").hidden = true), 7000);
+}
+function globalError(error) {
+  $("global-error").textContent = error.message || String(error);
+  $("global-error").hidden = false;
+}
+async function busy(button, action) {
+  if (button.disabled) return;
+  button.disabled = true;
+  const old = button.textContent;
+  button.textContent = "Un instant…";
+  try {
+    return await action();
+  } finally {
+    button.disabled = false;
+    button.textContent = old;
+  }
+}
+function showLogin() {
+  if ($("meal-dialog").open) $("meal-dialog").close();
+  $("app").hidden = true;
+  $("login-screen").hidden = false;
+  state.user = null;
+  state.summary = null;
+  state.profile = null;
+  state.draft = [];
+  state.favorites = [];
+  state.integrations = null;
+  $("meal-text").value = "";
+  clearInterval(integrationTimer);
+}
+async function showApp(user) {
+  state.user = user;
+  $("login-screen").hidden = true;
+  $("app").hidden = false;
+  $("account-name").textContent = user.email;
+  $("selected-day").value = state.day;
+  $("selected-day").max = today();
+  $("meal-day").max = today();
+  await loadAll();
+  clearInterval(integrationTimer);
+  integrationTimer = setInterval(() => {
+    if (state.user) loadIntegrations().catch(() => {});
+  }, 15000);
+}
+async function loadAll() {
+  $("global-error").hidden = true;
+  const results = await Promise.allSettled([
+    loadDashboard(),
+    loadFavorites(),
+    loadProfile(),
+    loadIntegrations(),
+  ]);
+  for (const result of results)
+    if (result.status === "rejected") globalError(result.reason);
+  if (state.view === "trends") await loadTrends().catch(globalError);
+}
+async function loadDashboard() {
+  const selected = state.day;
+  const result = await api(`/api/dashboard?day=${selected}`);
+  if (selected !== state.day || !state.user) return;
+  state.summary = result;
+  renderDashboard();
+  renderMeals();
+}
+async function loadFavorites() {
+  const data = await api("/api/favorites");
+  if (!state.user) return;
+  state.favorites = data.favorites;
+  renderFavorites();
+}
+async function loadProfile() {
+  const data = await api("/api/profile");
+  if (!state.user) return;
+  state.profile = data.profile;
+  if (data.profile)
+    for (const [key, value] of Object.entries(data.profile)) {
+      const input = $("profile-form").elements.namedItem(key);
+      if (input) input.value = value;
+    }
+}
+async function loadIntegrations() {
+  const data = await api("/api/integrations");
+  if (!state.user) return;
+  state.integrations = data;
+  const cg = data.chatgpt,
+    ga = data.garmin;
+  $("chatgpt-status").textContent = cg.connected
+    ? `Compte connecté${cg.email ? " · " + cg.email : ""}. ${cg.model ? "Modèle : " + cg.model + "." : "Luna reste à vérifier."}`
+    : "Connecte ton forfait une première fois depuis le PC qui héberge MyMiam.";
+  $("connect-chatgpt").textContent = cg.connected
+    ? "Renouveler ma connexion"
+    : "Continue with ChatGPT";
+  $("refresh-models").hidden = !cg.connected;
+  $("parse-meal").disabled = !cg.connected;
+  $("parse-meal").title = cg.connected
+    ? ""
+    : "Connecte ton forfait depuis Profil & connexions. La saisie manuelle est disponible.";
+  $("garmin-status").textContent =
+    ga.error ||
+    {
+      connecting: "Connexion Garmin en cours…",
+      mfa: "Garmin attend ton code de vérification.",
+    }[ga.state] ||
+    (ga.connected
+      ? "Garmin est connecté. Synchronise pour récupérer tes données."
+      : "Pas encore connecté.");
+  $("garmin-form").hidden =
+    ga.connected || ga.state === "connecting" || ga.state === "mfa";
+  $("garmin-mfa").hidden = ga.state !== "mfa";
+  $("sync-garmin").hidden = !ga.connected;
+  if (data.catalogue)
+    $("catalogue-status").textContent =
+      `${fmt(data.catalogue.foods)} aliments Ciqual 2025 · Anses, Licence Ouverte. Produits Open Food Facts · ODbL.`;
+}
+function renderDashboard() {
+  const s = state.summary,
+    goal = s.targets?.kcal;
+  $("intake-kcal").innerHTML = `${fmt(s.intake.kcal)}<small>kcal</small>`;
+  $("expenditure-value").textContent =
+    s.expenditure == null ? "—" : fmt(s.expenditure) + " kcal";
+  $("target-value").textContent = goal == null ? "—" : fmt(goal) + " kcal";
+  $("deficit-value").textContent =
+    s.deficit == null
+      ? "À compléter"
+      : `${s.deficit >= 0 ? "−" : "+"}${fmt(Math.abs(s.deficit))} kcal`;
+  const pct = goal ? Math.round((s.intake.kcal / goal) * 100) : null;
+  $("energy-pct").textContent =
+    pct == null || s.intake.kcal == null ? "—" : pct + "%";
+  $("energy-progress").setAttribute(
+    "stroke-dasharray",
+    `${pct == null || s.intake.kcal == null ? 0 : Math.max(0, Math.min(100, pct))} 100`,
+  );
+  $("energy-caption").textContent =
+    s.intake.kcal == null
+      ? "Certaines valeurs alimentaires sont manquantes."
+      : !s.has_meals
+        ? "Un premier repas pour commencer."
+        : goal == null
+          ? "Complète ton profil pour définir ton objectif."
+          : `${fmt(Math.max(0, goal - s.intake.kcal))} kcal jusqu’à ton objectif${s.intake.kcal > goal ? " · objectif dépassé" : ""}.`;
+  $("day-state").textContent = s.projected
+    ? "Journée en cours"
+    : s.complete
+      ? "Journal complet"
+      : "À compléter";
+  $("expenditure-note").textContent =
+    s.expenditure == null
+      ? "Complète ton profil pour calculer tes repères."
+      : `${s.expenditure_source}${s.projected ? " · bilan provisoire" : ""}. Repos estimé : ${fmt(s.resting)} kcal.`;
+  $("macro-cards").innerHTML = Object.entries(macroNames)
+    .map(([key, name]) => {
+      const value = s.intake[key],
+        target = s.targets?.[key],
+        pct =
+          target && value != null ? Math.min(100, (value / target) * 100) : 0;
+      return `<article class="macro-card ${key}"><div class="macro-top">${name}<span class="macro-chip">${key === "protein" ? "Construction" : key === "carbs" ? "Énergie" : "Équilibre"}</span></div><div class="macro-number">${fmt(value, 1)} <small>g${target == null ? "" : " / " + fmt(target) + " g"}</small></div><svg class="macro-bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="6" rx="3"></rect></svg><p class="footnote">${value == null ? "Données à compléter" : target == null ? "Objectif à définir" : fmt(Math.max(0, target - value), 1) + " g jusqu’à l’objectif"}</p></article>`;
+    })
+    .join("");
+  $("complete-day").textContent = s.complete
+    ? "Rouvrir la journée"
+    : "Confirmer la journée";
+  const ga = s.garmin;
+  $("garmin-day").innerHTML = ga?.has_data
+    ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total ${ga.partial ? "observé jusqu’ici" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Calories actives, déjà incluses</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Repos ${ga.partial ? "accumulé" : "Garmin"}</span></div></div><p class="muted footnote">${ga.partial ? "Données provisoires : l’objectif utilise la projection de ton profil." : "Le total Garmin prend le relais de l’estimation du profil."} Synchronisé le ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
+    : `<p class="muted">Aucune donnée Garmin pour cette journée. ${state.integrations?.garmin?.connected ? "Tu peux lancer une synchronisation depuis ton profil." : "Connecte Garmin depuis ton profil pour suivre ta dépense."}</p>`;
+  if (ga?.activities?.length)
+    $("garmin-day").innerHTML +=
+      '<div class="spaced">' +
+      ga.activities
+        .map(
+          (a) =>
+            `<div class="section-head garmin-activity"><span>${escapeHTML(a.name)} · ${a.duration == null ? "—" : fmt(a.duration / 60)} min</span><strong>${fmt(a.calories)} kcal</strong></div>`,
+        )
+        .join("") +
+      '<p class="muted footnote">Détail des séances ; leurs calories ne sont pas ajoutées au total une seconde fois.</p></div>';
+}
+function renderMeals() {
+  const meals = [...state.summary.meals].sort(
+    (a, b) =>
+      Object.keys(slots).indexOf(a.slot) - Object.keys(slots).indexOf(b.slot),
+  );
+  const empty =
+    '<div class="empty-state"><strong>Ton journal commence ici.</strong><p>Raconte ton premier repas ou ajoute un aliment.</p><button class="ghost-button" data-action="new-meal">Ajouter mon repas ＋</button></div>';
+  const markup = (expanded) =>
+    meals
+      .map(
+        (m) =>
+          `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · portions estimées" : ""}</p>${expanded ? m.items.map((i) => `<p>${escapeHTML(i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}<br>${escapeHTML(i.source)}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).length ? " · certaines valeurs non chiffrées" : ""}</p>`).join("") : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`,
+      )
+      .join("") || empty;
+  $("today-meals").innerHTML = markup(false);
+  $("journal-meals").innerHTML = markup(true);
+}
+function renderFavorites() {
+  $("favorite-list").innerHTML =
+    state.favorites
+      .map(
+        (f) =>
+          `<article class="panel favorite-card"><p class="eyebrow">MON REPAS HABITUEL</p><h2>${escapeHTML(f.title)}</h2><p>${f.items.map((i) => escapeHTML(i.name) + " · " + fmt(i.grams, 1) + " g").join("<br>")}</p><div class="section-head"><button class="primary-button" data-use-favorite="${f.id}">Réutiliser ↗</button><button class="text-button" data-remove-favorite="${f.id}">Supprimer</button></div></article>`,
+      )
+      .join("") ||
+    '<div class="empty-state"><strong>Un repas que tu aimes retrouver ?</strong><p>Enregistre-le comme habitude depuis le journal ou la fiche de repas.</p></div>';
+}
+function switchView(view) {
+  if (!["today", "journal", "trends", "favorites", "profile"].includes(view))
+    return;
+  state.view = view;
+  for (const section of document.querySelectorAll(".view"))
+    section.hidden = section.id !== `view-${view}`;
+  for (const button of document.querySelectorAll(".nav-button"))
+    button.classList.toggle("active", button.dataset.view === view);
+  $("view-title").innerHTML =
+    {
+      today: "Aujourd’hui",
+      journal: "Mes repas",
+      trends: "Mes tendances",
+      favorites: "Mes habitudes",
+      profile: "Mon profil",
+    }[view] + '<span class="accent">.</span>';
+  $("view-eyebrow").textContent = {
+    today: "MON ÉQUILIBRE",
+    journal: "MON JOURNAL",
+    trends: "DANS LA DURÉE",
+    favorites: "MES ESSENTIELS",
+    profile: "MES REPÈRES",
+  }[view];
+  location.hash = view;
+  if (view === "trends") loadTrends().catch(globalError);
+  if (view === "profile") loadIntegrations().catch(globalError);
+}
+function changeDay(day) {
+  if (day > today()) return;
+  state.day = day;
+  $("selected-day").value = day;
+  $("next-day").disabled = day >= today();
+  loadDashboard().catch(globalError);
+  if (state.view === "trends") loadTrends().catch(globalError);
+}
+function shiftDay(amount) {
+  const day = new Date(state.day + "T12:00:00");
+  day.setDate(day.getDate() + amount);
+  changeDay(
+    `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
+  );
+}
+function editableItem(item) {
+  return {
+    label: item.name || item.label || "",
+    food_id: item.food_id || null,
+    grams: item.grams ?? "",
+    estimated: !!item.estimated,
+    note: item.note || "",
+    food: item.name
+      ? {
+          id: item.food_id,
+          name: item.name,
+          source: item.source,
+          nutrients: Object.fromEntries(
+            Object.entries(item.nutrients).map(([k, v]) => [
+              k,
+              v == null ? null : (v * 100) / item.grams,
+            ]),
+          ),
+          flags: item.flags || {},
+        }
+      : (item.matches || []).find((f) => f.id === item.food_id) || null,
+    matches: item.matches || [],
+  };
+}
+function openMeal(meal = null, duplicate = false) {
+  state.editId = meal && !duplicate ? meal.id : null;
+  state.requestId = crypto.randomUUID();
+  state.draft = (meal?.items || []).map(editableItem);
+  $("meal-form").reset();
+  $("meal-text").value = meal?.text || "";
+  $("meal-day").value = duplicate ? state.day : meal?.day || state.day;
+  $("meal-slot").value = meal?.slot || "lunch";
+  $("meal-title").value = meal?.title || "";
+  $("meal-dialog-title").textContent = state.editId
+    ? "Ajuste ton repas"
+    : "Raconte ton repas";
+  $("meal-error").textContent = "";
+  $("meal-questions").hidden = true;
+  $("review-section").hidden = !state.draft.length;
+  $("parse-meal").disabled = !state.integrations?.chatgpt.connected;
+  renderDraft();
+  $("meal-dialog").showModal();
+}
+function addFood(food = null) {
+  state.draft.push({
+    label: food?.name || "",
+    food_id: food?.id || null,
+    grams: "",
+    estimated: false,
+    note: "",
+    food,
+    matches: [],
+  });
+  $("review-section").hidden = false;
+  $("review-confirm").checked = false;
+  renderDraft();
+  const input = $("meal-items").querySelector(
+    ".review-row:last-child .food-query",
+  );
+  if (input) input.focus();
+}
+function renderDraft() {
+  $("meal-items").innerHTML = state.draft
+    .map(
+      (item, index) =>
+        `<div class="review-row" data-index="${index}"><div class="review-grid"><label>Aliment à vérifier<input class="food-query" value="${escapeHTML(item.food?.name || item.label)}" placeholder="Chercher dans Ciqual…" autocomplete="off"></label><label>Poids (g)<input class="food-grams" type="number" min="0.1" max="10000" step="0.1" value="${escapeHTML(item.grams)}" required></label><button type="button" class="remove-food" aria-label="Retirer l’aliment">×</button></div><div class="food-results">${item.matches.length && !item.food ? matchButtons(item.matches) : ""}</div><p class="review-source">${item.food ? escapeHTML(item.food.source) + " · correspondance sélectionnée" : "Choisis une correspondance alimentaire."}</p>${item.note ? `<p class="review-note">${escapeHTML(item.note)}</p>` : ""}<label class="check-label"><input class="food-estimated" type="checkbox" ${item.estimated ? "checked" : ""}> Portion estimée</label></div>`,
+    )
+    .join("");
+  updatePreview();
+}
+function matchButtons(matches) {
+  return (
+    matches
+      .map(
+        (food, index) =>
+          `<button type="button" class="food-result" data-match="${index}">${escapeHTML(food.name)} <small>· ${fmt(food.nutrients.kcal)} kcal / 100 g</small></button>`,
+      )
+      .join("") ||
+    '<p class="muted footnote">Aucune correspondance. Essaie un nom plus court ou un code-barres.</p>'
+  );
+}
+function updatePreview() {
+  const values = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  for (const item of state.draft)
+    for (const key of Object.keys(values)) {
+      if (!item.food || !Number(item.grams) || item.food.nutrients[key] == null)
+        values[key] = null;
+      else if (values[key] != null)
+        values[key] += (item.food.nutrients[key] * Number(item.grams)) / 100;
+    }
+  $("meal-preview").innerHTML = Object.entries(values)
+    .map(
+      ([key, v]) =>
+        `<div><strong>${fmt(v, 1)} ${key === "kcal" ? "kcal" : "g"}</strong><small>${key === "kcal" ? "Énergie" : macroNames[key]}</small></div>`,
+    )
+    .join("");
+}
+function draftPayload() {
+  if (!state.draft.length) throw new Error("Ajoute au moins un aliment.");
+  if (
+    state.draft.some(
+      (i) =>
+        !i.food_id || !Number.isFinite(Number(i.grams)) || Number(i.grams) <= 0,
+    )
+  )
+    throw new Error(
+      "Choisis chaque aliment et renseigne son poids en grammes.",
+    );
+  return {
+    title: $("meal-title").value || slots[$("meal-slot").value],
+    day: $("meal-day").value,
+    slot: $("meal-slot").value,
+    text: $("meal-text").value,
+    request_id: state.requestId,
+    items: state.draft.map((i) => ({
+      food_id: i.food_id,
+      grams: Number(i.grams),
+      estimated: i.estimated,
+      note: i.note,
+    })),
+  };
+}
+async function parseMeal() {
+  $("meal-error").textContent = "";
+  const text = $("meal-text").value.trim();
+  if (text.length < 3)
+    throw new Error("Dicte ou écris ton repas dans le champ texte.");
+  const data = await api("/api/meals/parse", {
+    method: "POST",
+    body: { text },
+  });
+  state.draft = data.items.map(editableItem);
+  $("meal-title").value = data.title || "";
+  $("review-confirm").checked = false;
+  $("review-section").hidden = false;
+  $("meal-questions").hidden = !data.questions?.length;
+  $("meal-questions").textContent = (data.questions || []).join(" ");
+  renderDraft();
+}
+async function loadTrends() {
+  const selected = state.day;
+  const data = await api(
+    `/api/trends?day=${selected}&days=${$("trend-period").value}`,
+  );
+  if (selected !== state.day || !state.user) return;
+  const complete = data.days.filter(
+    (d) => d.day < today() && d.deficit != null,
+  );
+  const intake = complete.length
+    ? complete.reduce((sum, d) => sum + d.intake.kcal, 0) / complete.length
+    : null;
+  $("trend-kpis").innerHTML = [
+    [
+      "Déficit cumulé",
+      fmt(data.cumulative_deficit),
+      "kcal",
+      data.covered_days
+        ? "Les surplus réduisent ce cumul."
+        : "Aucune journée complète passée.",
+    ],
+    [
+      "Couverture du suivi",
+      `${data.covered_days} / ${data.elapsed_days}`,
+      "jours",
+      "Journées complètes avec bilan calculable.",
+    ],
+    [
+      "Apports moyens",
+      fmt(intake),
+      "kcal / jour",
+      "Calculés sur les journées complètes.",
+    ],
+  ]
+    .map(
+      ([title, value, unit, note]) =>
+        `<article class="macro-card"><div class="macro-top">${title}</div><div class="macro-number">${value} <small>${unit}</small></div><p class="footnote">${note}</p></article>`,
+    )
+    .join("");
+  renderEnergyChart(data.days);
+  renderWeightChart(data.weights);
+  $("trend-table").innerHTML = [...data.days]
+    .reverse()
+    .map(
+      (d) =>
+        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? fmt(d.deficit) : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.complete ? "Complet" : "À compléter"}</span></td></tr>`,
+    )
+    .join("");
+}
+function renderEnergyChart(days) {
+  if (!days.some((d) => d.expenditure != null || d.has_meals)) {
+    $("trend-chart").innerHTML =
+      '<div class="empty-state"><p>Complète ton profil et ajoute des repas pour afficher les tendances.</p></div>';
+    return;
+  }
+  const width = 800,
+    height = 205,
+    left = 48,
+    top = 10,
+    bottom = 30,
+    plot = height - top - bottom;
+  const max =
+    Math.max(
+      1000,
+      ...days.map((d) =>
+        Math.max(d.has_meals ? d.intake.kcal || 0 : 0, d.expenditure || 0),
+      ),
+    ) * 1.12;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Apports et dépenses sur la période">`;
+  for (let i = 0; i < 4; i++) {
+    const y = top + (plot * i) / 3;
+    svg += `<line class="grid-line" x1="${left}" y1="${y}" x2="${width}" y2="${y}"/><text x="0" y="${y + 4}">${fmt(max * (1 - i / 3))}</text>`;
+  }
+  const step = (width - left) / days.length,
+    bar = Math.min(13, step * 0.32);
+  days.forEach((d, i) => {
+    const x = left + i * step + step * 0.15;
+    for (const [value, kind, shift] of [
+      [d.has_meals || d.complete ? d.intake.kcal : null, "intake", 0],
+      [d.expenditure, "expense", bar + 2],
+    ]) {
+      if (value == null) continue;
+      const h = (value / max) * plot;
+      svg += `<rect class="${kind}-bar" x="${x + shift}" y="${top + plot - h}" width="${bar}" height="${h}" rx="2" ${d.complete ? "" : 'opacity="0.5"'}><title>${d.day} · ${kind === "intake" ? "Apports" : "Dépense"} : ${fmt(value)} kcal${d.complete ? "" : " · journée incomplète"}</title></rect>`;
+    }
+    if (i % Math.max(1, Math.floor(days.length / 7)) === 0)
+      svg += `<text x="${x}" y="${height - 6}">${d.day.slice(8)}/${d.day.slice(5, 7)}</text>`;
+  });
+  $("trend-chart").innerHTML = svg + "</svg>";
+}
+function renderWeightChart(weights) {
+  if (!weights.length) {
+    $("weight-chart").innerHTML =
+      '<div class="empty-state"><p>Ajoute une mesure pour commencer à suivre ta tendance.</p></div>';
+    return;
+  }
+  const low = Math.min(...weights.map((w) => w.weight)) - 1,
+    high = Math.max(...weights.map((w) => w.weight)) + 1;
+  const points = weights.map((w, i) => ({
+    x: 55 + (i * 700) / Math.max(1, weights.length - 1),
+    y: 160 - ((w.weight - low) / (high - low)) * 130,
+    w,
+  }));
+  let svg =
+    '<svg viewBox="0 0 800 200" role="img" aria-label="Évolution du poids">';
+  for (let i = 0; i < 3; i++) {
+    const y = 30 + i * 65;
+    svg += `<line class="grid-line" x1="50" y1="${y}" x2="790" y2="${y}"/><text x="0" y="${y + 4}">${fmt(high - ((high - low) * i) / 2, 1)} kg</text>`;
+  }
+  svg += `<polyline class="weight-line" points="${points.map((p) => p.x + "," + p.y).join(" ")}"/>`;
+  for (const p of points)
+    svg += `<circle class="weight-point" cx="${p.x}" cy="${p.y}" r="4"><title>${p.w.day} · ${fmt(p.w.weight, 1)} kg</title></circle>`;
+  svg += `<text x="50" y="192">${weights[0].day}</text><text x="680" y="192">${weights[weights.length - 1].day}</text></svg>`;
+  $("weight-chart").innerHTML = svg;
+}
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  try {
+    if (button.dataset.view) switchView(button.dataset.view);
+    if (button.dataset.action === "new-meal") openMeal();
+    if (button.dataset.edit)
+      openMeal(state.summary.meals.find((m) => m.id === button.dataset.edit));
+    if (button.dataset.duplicate)
+      openMeal(
+        state.summary.meals.find((m) => m.id === button.dataset.duplicate),
+        true,
+      );
+    if (button.dataset.favorite) {
+      const m = state.summary.meals.find(
+        (m) => m.id === button.dataset.favorite,
+      );
+      await api("/api/favorites", {
+        method: "POST",
+        body: { title: m.title, items: m.items },
+      });
+      await loadFavorites();
+      toast("Repas ajouté à tes habitudes.");
+    }
+    if (button.dataset.delete && confirm("Supprimer ce repas du journal ?")) {
+      await api("/api/meals/" + button.dataset.delete, {
+        method: "DELETE",
+        body: {},
+      });
+      await loadDashboard();
+      toast("Repas supprimé.");
+    }
+    if (button.dataset.useFavorite) {
+      const f = state.favorites.find(
+        (f) => f.id === button.dataset.useFavorite,
+      );
+      openMeal({ ...f, slot: "lunch", day: state.day }, true);
+    }
+    if (
+      button.dataset.removeFavorite &&
+      confirm("Supprimer ce repas habituel ?")
+    ) {
+      await api("/api/favorites/" + button.dataset.removeFavorite, {
+        method: "DELETE",
+        body: {},
+      });
+      await loadFavorites();
+    }
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("login-error").textContent = "";
+  const form = event.currentTarget,
+    button = form.querySelector("button");
+  try {
+    await busy(button, async () => {
+      const data = await api("/api/auth/login", {
+        method: "POST",
+        body: Object.fromEntries(new FormData(form)),
+      });
+      form.elements.password.value = "";
+      await showApp(data.user);
+    });
+  } catch (error) {
+    $("login-error").textContent = error.message;
+  }
+});
+async function logout() {
+  try {
+    await api("/api/auth/logout", { method: "POST", body: {} });
+    showLogin();
+  } catch (error) {
+    globalError(error);
+  }
+}
+$("logout").addEventListener("click", logout);
+$("logout-profile").addEventListener("click", logout);
+$("selected-day").addEventListener("change", (event) =>
+  changeDay(event.target.value),
+);
+$("previous-day").addEventListener("click", () => shiftDay(-1));
+$("next-day").addEventListener("click", () => shiftDay(1));
+$("close-meal").addEventListener("click", () => $("meal-dialog").close());
+$("manual-meal").addEventListener("click", () => addFood());
+$("add-food").addEventListener("click", () => addFood());
+$("parse-meal").addEventListener("click", async () => {
+  try {
+    await busy($("parse-meal"), parseMeal);
+  } catch (error) {
+    $("meal-error").textContent = error.message;
+  }
+});
+$("meal-items").addEventListener("input", (event) => {
+  const row = event.target.closest(".review-row");
+  if (!row) return;
+  const item = state.draft[Number(row.dataset.index)];
+  $("review-confirm").checked = false;
+  if (event.target.matches(".food-grams")) {
+    item.grams = event.target.value;
+    updatePreview();
+  }
+  if (event.target.matches(".food-estimated"))
+    item.estimated = event.target.checked;
+  if (event.target.matches(".food-query")) {
+    item.label = event.target.value;
+    item.food = null;
+    item.food_id = null;
+    row.querySelector(".review-source").textContent = "Sélectionne un aliment.";
+    updatePreview();
+    clearTimeout(item.searchTimer);
+    const query = item.label;
+    item.searchTimer = setTimeout(async () => {
+      try {
+        const data = await api("/api/foods?q=" + encodeURIComponent(query));
+        if (item.label !== query || !row.isConnected) return;
+        item.matches = data.foods;
+        row.querySelector(".food-results").innerHTML = matchButtons(
+          item.matches,
+        );
+      } catch (error) {
+        $("meal-error").textContent = error.message;
+      }
+    }, 250);
+  }
+});
+$("meal-items").addEventListener("click", (event) => {
+  const row = event.target.closest(".review-row");
+  if (!row) return;
+  const index = Number(row.dataset.index),
+    item = state.draft[index];
+  const match = event.target.closest("[data-match]");
+  if (match) {
+    const food = item.matches[Number(match.dataset.match)];
+    item.food = food;
+    item.food_id = food.id;
+    item.label = food.name;
+    item.matches = [];
+    renderDraft();
+    $("review-confirm").checked = false;
+  }
+  if (event.target.closest(".remove-food")) {
+    state.draft.splice(index, 1);
+    renderDraft();
+    $("review-confirm").checked = false;
+  }
+});
+$("meal-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("meal-error").textContent = "";
+  try {
+    if (!$("review-confirm").checked)
+      throw new Error("Confirme la vérification des aliments et des portions.");
+    const payload = draftPayload();
+    await busy($("save-meal"), async () => {
+      await api(state.editId ? "/api/meals/" + state.editId : "/api/meals", {
+        method: state.editId ? "PUT" : "POST",
+        body: payload,
+      });
+      $("meal-dialog").close();
+      await loadDashboard();
+      toast("Repas enregistré.");
+    });
+  } catch (error) {
+    $("meal-error").textContent = error.message;
+  }
+});
+$("favorite-draft").addEventListener("click", async () => {
+  try {
+    const payload = draftPayload();
+    await busy($("favorite-draft"), () =>
+      api("/api/favorites", { method: "POST", body: payload }),
+    );
+    await loadFavorites();
+    toast("Repas ajouté à tes habitudes.");
+  } catch (error) {
+    $("meal-error").textContent = error.message;
+  }
+});
+$("barcode-food").addEventListener("click", async () => {
+  const barcode = prompt("Code-barres du produit (8 à 14 chiffres)");
+  if (!barcode) return;
+  try {
+    const data = await api(
+      "/api/foods/barcode/" + encodeURIComponent(barcode.trim()),
+    );
+    addFood(data.food);
+  } catch (error) {
+    $("meal-error").textContent = error.message;
+  }
+});
+$("complete-day").addEventListener("click", async () => {
+  try {
+    if (
+      !state.summary.complete &&
+      !state.summary.has_meals &&
+      !confirm(
+        "Aucun repas n’est saisi. Confirmer signifie que tu n’as rien consommé ce jour-là. Confirmer cette journée ?",
+      )
+    )
+      return;
+    await busy($("complete-day"), () =>
+      api("/api/day", {
+        method: "PUT",
+        body: { day: state.day, complete: !state.summary.complete },
+      }),
+    );
+    await loadDashboard();
+    toast(
+      state.summary.complete
+        ? "Journal de la journée confirmé."
+        : "Journée remise à compléter.",
+    );
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("profile-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await busy(event.currentTarget.querySelector("button"), () =>
+      api("/api/profile", {
+        method: "PUT",
+        body: Object.fromEntries(new FormData(event.currentTarget)),
+      }),
+    );
+    await loadDashboard();
+    toast("Profil et objectifs enregistrés.");
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("weight-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/weights", {
+      method: "POST",
+      body: { day: state.day, weight: $("new-weight").value },
+    });
+    $("new-weight").value = "";
+    await Promise.all([loadTrends(), loadDashboard()]);
+    toast("Poids enregistré.");
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("trend-period").addEventListener("change", () =>
+  loadTrends().catch(globalError),
+);
+$("connect-chatgpt").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/chatgpt/connect", {
+      method: "POST",
+      body: {},
+    });
+    toast(data.message);
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("refresh-models").addEventListener("click", async () => {
+  try {
+    await busy($("refresh-models"), () =>
+      api("/api/chatgpt/models", { method: "POST", body: {} }),
+    );
+    await loadIntegrations();
+    toast("Luna est disponible sur cette connexion.");
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("garmin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const form = event.currentTarget;
+    await busy(form.querySelector("button"), () =>
+      api("/api/garmin/connect", {
+        method: "POST",
+        body: Object.fromEntries(new FormData(form)),
+      }),
+    );
+    form.elements.password.value = "";
+    await loadIntegrations();
+    toast("Connexion Garmin en cours.");
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("garmin-mfa").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/garmin/mfa", {
+      method: "POST",
+      body: Object.fromEntries(new FormData(event.currentTarget)),
+    });
+    event.currentTarget.elements.code.value = "";
+    await loadIntegrations();
+  } catch (error) {
+    globalError(error);
+  }
+});
+$("sync-garmin").addEventListener("click", async () => {
+  try {
+    const data = await busy($("sync-garmin"), () =>
+      api("/api/garmin/sync", { method: "POST", body: { day: state.day } }),
+    );
+    await loadDashboard();
+    toast(`${data.updated} journées Garmin synchronisées.`);
+  } catch (error) {
+    globalError(error);
+  }
+});
+window.addEventListener("hashchange", () => {
+  if (state.user && location.hash.slice(1) !== state.view)
+    switchView(location.hash.slice(1));
+});
+window.addEventListener("online", () => {
+  if (state.user) loadAll().catch(globalError);
+});
+(async () => {
+  try {
+    const data = await api("/api/auth/me");
+    if (data.user) {
+      await showApp(data.user);
+      switchView(location.hash.slice(1) || "today");
+    } else showLogin();
+  } catch (error) {
+    $("login-error").textContent = error.message;
+  }
+  if ("serviceWorker" in navigator)
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+})();

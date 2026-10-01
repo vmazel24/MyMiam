@@ -1,0 +1,11 @@
+.venv/
+instance/
+__pycache__/
+*.pyc
+.env
+node_modules/
+test-results/
+playwright-report/
+CADRAGE.md
+AUDIT_RENFO.md
+LOCAL_DEPLOYMENT.md

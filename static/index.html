@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#202723" />
+    <meta name="description" content="Votre journal nutritionnel personnel." />
+    <title>MyMiam · Mon équilibre au quotidien</title>
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div id="login-screen" class="login-screen">
+      <div class="login-art">
+        <div class="brand-mark">M<span>m</span></div>
+        <p class="eyebrow">MON ÉQUILIBRE AU QUOTIDIEN</p>
+        <h1>BIEN MANGER.<br />Y VOIR CLAIR.</h1>
+        <p>
+          Un journal simple. Des repères utiles.<br />Une vue d’ensemble qui
+          t’appartient.
+        </p>
+        <div class="art-plate" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+      <form id="login-form" class="auth-card">
+        <div class="brand-lockup">
+          <div class="brand-mark">M<span>m</span></div>
+          <div class="brand-name">
+            MYMIAM<small>NUTRITION PERSONNELLE</small>
+          </div>
+        </div>
+        <p class="eyebrow">TON ESPACE PERSONNEL</p>
+        <h2>Content de te retrouver.</h2>
+        <p class="muted">Connecte-toi avec ton compte Renfo.</p>
+        <label
+          >Email<input
+            name="email"
+            type="email"
+            autocomplete="username"
+            required /></label
+        ><label
+          >Mot de passe<input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+        /></label>
+        <p id="login-error" class="error" role="alert"></p>
+        <button class="primary-button" type="submit">
+          Ouvrir mon dashboard <span aria-hidden="true">↗</span></button
+        ><small class="muted">Un espace réservé au compte propriétaire.</small>
+      </form>
+    </div>
+    <div id="app" class="app-layout" hidden>
+      <aside class="sidebar">
+        <a class="brand-lockup" href="#today"
+          ><div class="brand-mark">M<span>m</span></div>
+          <div class="brand-name">
+            MYMIAM<small>NUTRITION PERSONNELLE</small>
+          </div></a
+        >
+        <p class="sidebar-label">MON SUIVI</p>
+        <nav aria-label="Navigation principale">
+          <button data-view="today" class="nav-button active">
+            <span aria-hidden="true">◫</span> Aujourd’hui</button
+          ><button data-view="journal" class="nav-button">
+            <span aria-hidden="true">≡</span> Journal des repas</button
+          ><button data-view="trends" class="nav-button">
+            <span aria-hidden="true">↗</span> Tendances</button
+          ><button data-view="favorites" class="nav-button">
+            <span aria-hidden="true">☆</span> Mes habitudes</button
+          ><button data-view="profile" class="nav-button">
+            <span aria-hidden="true">◎</span> Profil & connexions
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="connection-indicator">
+            <span></span> Mon journal, mes repères
+          </div>
+          <button id="logout" class="account-button">
+            <span id="account-name">Mon compte</span
+            ><small>Déconnexion ↗</small>
+          </button>
+        </div>
+      </aside>
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="view-eyebrow">MON ÉQUILIBRE</p>
+            <h1 id="view-title">Aujourd’hui<span class="accent">.</span></h1>
+          </div>
+          <div class="date-controls">
+            <button
+              id="previous-day"
+              class="icon-button"
+              aria-label="Jour précédent"
+            >
+              ‹</button
+            ><label class="sr-only" for="selected-day">Journée affichée</label
+            ><input type="date" id="selected-day" /><button
+              id="next-day"
+              class="icon-button"
+              aria-label="Jour suivant"
+            >
+              ›
+            </button>
+          </div>
+        </header>
+        <div id="global-error" class="notice error" role="alert" hidden></div>
+        <section id="view-today" class="view">
+          <div class="hero-grid">
+            <article class="energy-card">
+              <div class="section-head">
+                <p class="eyebrow">MON BILAN DU JOUR</p>
+                <span class="dark-pill" id="day-state">À compléter</span>
+              </div>
+              <div class="energy-main">
+                <div>
+                  <p class="muted-light">Calories consommées</p>
+                  <div class="big-number" id="intake-kcal">
+                    —<small>kcal</small>
+                  </div>
+                  <p class="hero-caption" id="energy-caption">
+                    Un premier repas pour commencer.
+                  </p>
+                </div>
+                <svg
+                  class="energy-ring"
+                  viewBox="0 0 140 140"
+                  role="img"
+                  aria-label="Progression de l’objectif calorique"
+                >
+                  <circle class="ring-track" cx="70" cy="70" r="59"></circle>
+                  <circle
+                    id="energy-progress"
+                    class="ring-value"
+                    stroke-dasharray="0 100"
+                    cx="70"
+                    cy="70"
+                    r="59"
+                    pathLength="100"
+                  ></circle>
+                  <text x="70" y="65" id="energy-pct">—</text>
+                  <text x="70" y="86" class="ring-label">de l’objectif</text>
+                </svg>
+              </div>
+              <div class="energy-footer">
+                <div>
+                  <span>Dépense estimée</span
+                  ><strong id="expenditure-value">—</strong>
+                </div>
+                <div>
+                  <span>Objectif d’apports</span
+                  ><strong id="target-value">—</strong>
+                </div>
+                <div>
+                  <span>Bilan calorique</span
+                  ><strong id="deficit-value">—</strong>
+                </div>
+              </div>
+              <p class="footnote" id="expenditure-note">
+                Complète ton profil pour calculer tes repères.
+              </p>
+            </article>
+            <article class="capture-card">
+              <span class="capture-icon" aria-hidden="true">✳</span>
+              <p class="eyebrow">MOINS DE SAISIE, PLUS DE VIE</p>
+              <h2>Raconte <br />ton repas.</h2>
+              <p>
+                Dicte avec le micro du clavier de ton téléphone. Vérifie. C’est
+                enregistré.
+              </p>
+              <button class="primary-button" data-action="new-meal">
+                Ajouter mon repas <span aria-hidden="true">＋</span></button
+              ><small>Texte, aliments ou repas habituel.</small>
+            </article>
+          </div>
+          <div class="section-head spaced">
+            <div>
+              <p class="eyebrow">LES BONS REPÈRES</p>
+              <h2>L’équilibre de mon assiette</h2>
+            </div>
+            <button class="text-button" data-view="profile">
+              Mes objectifs ↗
+            </button>
+          </div>
+          <div class="macro-grid" id="macro-cards"></div>
+          <div class="section-head spaced">
+            <div>
+              <p class="eyebrow">AU FIL DE LA JOURNÉE</p>
+              <h2>Mes repas</h2>
+            </div>
+            <button class="text-button" data-action="new-meal">
+              Ajouter ＋
+            </button>
+          </div>
+          <div id="today-meals" class="meal-list"></div>
+          <div class="day-confirm">
+            <div>
+              <strong>Tout est dans le journal ?</strong>
+              <p class="muted">
+                Confirme la journée pour l’inclure dans tes tendances. Une
+                modification la remet à compléter.
+              </p>
+            </div>
+            <button id="complete-day" class="ghost-button">
+              Confirmer la journée
+            </button>
+          </div>
+          <div class="section-head spaced">
+            <div>
+              <p class="eyebrow">BOUGER & DÉPENSER</p>
+              <h2>Mon activité Garmin</h2>
+            </div>
+            <button class="text-button" data-view="profile">
+              Gérer la connexion ↗
+            </button>
+          </div>
+          <div id="garmin-day" class="panel"></div>
+        </section>
+        <section id="view-journal" class="view" hidden>
+          <div class="section-head">
+            <p class="muted">
+              Tous les aliments, portions et sources de la journée sélectionnée.
+            </p>
+            <button class="primary-button" data-action="new-meal">
+              Ajouter un repas ＋
+            </button>
+          </div>
+          <div id="journal-meals" class="meal-list spaced"></div>
+        </section>
+        <section id="view-trends" class="view" hidden>
+          <div class="section-head">
+            <p class="muted">
+              Les jours complets donnent du sens aux chiffres.
+            </p>
+            <label
+              >Période<select id="trend-period">
+                <option value="7">7 jours</option>
+                <option value="30" selected>30 jours</option>
+                <option value="90">90 jours</option>
+              </select></label
+            >
+          </div>
+          <div id="trend-kpis" class="macro-grid spaced"></div>
+          <article class="panel spaced">
+            <div class="section-head">
+              <h2>Apports & dépense</h2>
+              <div class="legend">
+                <span class="intake-dot"></span> Apports
+                <span class="expense-dot"></span> Dépense
+              </div>
+            </div>
+            <div id="trend-chart" class="chart"></div>
+            <p class="muted footnote">
+              Un jour sans repas saisi reste inconnu. Le cumul inclut les
+              déficits et les surplus des jours complets passés.
+            </p>
+          </article>
+          <article class="panel spaced">
+            <div class="section-head">
+              <h2>Mon poids, dans la durée</h2>
+              <form id="weight-form" class="inline-form">
+                <label class="sr-only" for="new-weight">Poids en kg</label
+                ><input
+                  id="new-weight"
+                  type="number"
+                  min="30"
+                  max="350"
+                  step="0.1"
+                  placeholder="kg"
+                  required
+                /><button class="ghost-button">Ajouter</button>
+              </form>
+            </div>
+            <div id="weight-chart" class="chart"></div>
+          </article>
+          <article class="panel spaced">
+            <h2>Le détail des journées</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Jour</th>
+                    <th>Apports</th>
+                    <th>Dépense</th>
+                    <th>Déficit</th>
+                    <th>Suivi</th>
+                  </tr>
+                </thead>
+                <tbody id="trend-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+        <section id="view-favorites" class="view" hidden>
+          <p class="muted">
+            Tes recettes et repas habituels, prêts à être réutilisés et ajustés.
+          </p>
+          <div id="favorite-list" class="favorites-grid spaced"></div>
+        </section>
+        <section id="view-profile" class="view" hidden>
+          <div class="profile-grid">
+            <form id="profile-form" class="panel">
+              <p class="eyebrow">MES REPÈRES PERSONNELS</p>
+              <h2>Mon profil</h2>
+              <p class="muted">
+                Une estimation de repos et des objectifs modifiables, à partir
+                de tes données.
+              </p>
+              <div class="form-grid">
+                <label
+                  >Date de naissance<input
+                    name="birth_date"
+                    type="date"
+                    required /></label
+                ><label
+                  >Paramètre de l’équation<select name="sex">
+                    <option value="male">Homme</option>
+                    <option value="female">Femme</option>
+                  </select></label
+                ><label
+                  >Taille (cm)<input
+                    name="height"
+                    type="number"
+                    min="100"
+                    max="250"
+                    step="0.1"
+                    required /></label
+                ><label
+                  >Poids actuel (kg)<input
+                    name="weight"
+                    type="number"
+                    min="30"
+                    max="350"
+                    step="0.1"
+                    required /></label
+                ><label class="full"
+                  >Activité quotidienne habituelle<select
+                    name="activity_factor"
+                  >
+                    <option value="1.2">Peu active · facteur 1,2</option>
+                    <option value="1.4">Modérément active · facteur 1,4</option>
+                    <option value="1.6">Active · facteur 1,6</option>
+                    <option value="1.8">Très active · facteur 1,8</option>
+                  </select></label
+                ><label class="full"
+                  >Déficit souhaité (kcal / jour)<input
+                    name="deficit"
+                    type="number"
+                    min="0"
+                    max="1000"
+                    step="25"
+                    value="0"
+                    required
+                  /><small
+                    >0 pour le maintien. À adapter à ton objectif.</small
+                  ></label
+                >
+              </div>
+              <h3 class="spaced">Répartition des apports</h3>
+              <div class="form-grid three">
+                <label
+                  >Protéines (%)<input
+                    name="protein_pct"
+                    type="number"
+                    min="5"
+                    max="80"
+                    value="20"
+                    required /></label
+                ><label
+                  >Glucides (%)<input
+                    name="carbs_pct"
+                    type="number"
+                    min="5"
+                    max="80"
+                    value="45"
+                    required /></label
+                ><label
+                  >Lipides (%)<input
+                    name="fat_pct"
+                    type="number"
+                    min="5"
+                    max="80"
+                    value="35"
+                    required
+                /></label>
+              </div>
+              <p class="footnote muted">
+                Repos estimé par Mifflin–St Jeor. Sans Garmin, le facteur
+                d’activité projette la dépense totale. Avec une journée Garmin
+                passée, son total prend le relais.
+              </p>
+              <button class="primary-button" type="submit">
+                Enregistrer mon profil ↗
+              </button>
+            </form>
+            <div class="integration-stack">
+              <article class="panel">
+                <p class="eyebrow">COMPRENDRE MES REPAS</p>
+                <h2>Luna & mon forfait</h2>
+                <p id="chatgpt-status" class="muted">Connexion à vérifier.</p>
+                <button id="connect-chatgpt" class="ghost-button">
+                  Continue with ChatGPT</button
+                ><button id="refresh-models" class="text-button">
+                  Vérifier Luna ↗
+                </button>
+                <p class="footnote muted">
+                  Utilise ton quota inclus Codex / ChatGPT Work.
+                  <a
+                    href="https://chatgpt.com/settings/usage"
+                    target="_blank"
+                    rel="noopener"
+                    >Gérer les limites et désactiver les crédits supplémentaires
+                    ↗</a
+                  >
+                </p>
+              </article>
+              <article class="panel">
+                <p class="eyebrow">MA DÉPENSE QUOTIDIENNE</p>
+                <h2>Garmin Connect</h2>
+                <p id="garmin-status" class="muted">Pas encore connecté.</p>
+                <form id="garmin-form">
+                  <label
+                    >Email Garmin<input
+                      name="email"
+                      type="email"
+                      autocomplete="off"
+                      required /></label
+                  ><label
+                    >Mot de passe Garmin<input
+                      name="password"
+                      type="password"
+                      autocomplete="off"
+                      required /></label
+                  ><button class="ghost-button">Connecter Garmin</button>
+                </form>
+                <form id="garmin-mfa" hidden>
+                  <label
+                    >Code de vérification<input
+                      name="code"
+                      inputmode="numeric"
+                      autocomplete="one-time-code"
+                      required /></label
+                  ><button class="primary-button">Valider le code</button>
+                </form>
+                <button id="sync-garmin" class="ghost-button spaced" hidden>
+                  Synchroniser les 7 derniers jours
+                </button>
+                <p class="footnote muted">
+                  Connecteur communautaire. Mot de passe non conservé ; jetons
+                  stockés sur le serveur. Le total quotidien inclut déjà les
+                  calories actives.
+                </p>
+              </article>
+              <article class="panel">
+                <p class="eyebrow">MES DONNÉES M’APPARTIENNENT</p>
+                <h2>Sources & export</h2>
+                <button type="button" id="logout-profile" class="text-button">
+                  Déconnexion de mon compte ↗
+                </button>
+                <p class="muted" id="catalogue-status">
+                  Ciqual 2025 · Anses, Licence Ouverte.<br />Produits Open Food
+                  Facts · ODbL.
+                </p>
+                <a class="ghost-button button-link" href="/api/export"
+                  >Exporter mon journal ↓</a
+                >
+                <p class="footnote muted">
+                  <a
+                    href="https://ciqual.anses.fr"
+                    target="_blank"
+                    rel="noopener"
+                    >Ciqual ↗</a
+                  >
+                  ·
+                  <a
+                    href="https://world.openfoodfacts.org"
+                    target="_blank"
+                    rel="noopener"
+                    >Open Food Facts ↗</a
+                  >
+                  ·
+                  <a
+                    href="https://github.com/vmazel24/MyMiam"
+                    target="_blank"
+                    rel="noopener"
+                    >Code source ↗</a
+                  >
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+        <footer>MYMIAM <span>Un peu de clarté, chaque jour.</span></footer>
+      </main>
+    </div>
+    <dialog id="meal-dialog">
+      <form id="meal-form">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">MON JOURNAL</p>
+            <h2 id="meal-dialog-title">Raconte ton repas</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button"
+            id="close-meal"
+            aria-label="Fermer"
+          >
+            ×
+          </button>
+        </div>
+        <div class="form-grid">
+          <label
+            >Repas<select id="meal-slot">
+              <option value="breakfast">Petit déjeuner</option>
+              <option value="lunch" selected>Déjeuner</option>
+              <option value="dinner">Dîner</option>
+              <option value="snack">Collation</option>
+            </select></label
+          ><label>Date<input type="date" id="meal-day" required /></label>
+        </div>
+        <label for="meal-text">Qu’as-tu mangé ?</label
+        ><textarea
+          id="meal-text"
+          rows="4"
+          maxlength="4000"
+          placeholder="Ce midi, 150 g de poulet, 200 g de riz cuit, une cuillère d’huile d’olive…"
+        ></textarea>
+        <p class="dictation-hint">
+          ✳ Utilise le micro du clavier de ton téléphone pour dicter ici.
+        </p>
+        <div class="capture-actions">
+          <button type="button" id="parse-meal" class="primary-button">
+            Préparer avec Luna ✳</button
+          ><button type="button" id="manual-meal" class="ghost-button">
+            Ajouter un aliment ＋
+          </button>
+        </div>
+        <p id="meal-error" class="error" role="alert"></p>
+        <div id="review-section" hidden>
+          <div id="meal-questions" class="notice" hidden></div>
+          <label
+            >Nom du repas<input
+              id="meal-title"
+              maxlength="120"
+              placeholder="Mon déjeuner"
+          /></label>
+          <p class="muted footnote">
+            Vérifie chaque aliment, son état cru/cuit et son poids comestible.
+            Les correspondances proposées restent à confirmer.
+          </p>
+          <div id="meal-items"></div>
+          <div class="section-head spaced">
+            <button type="button" id="add-food" class="text-button">
+              Ajouter un aliment ＋</button
+            ><button type="button" id="barcode-food" class="text-button">
+              Code-barres ↗
+            </button>
+          </div>
+          <div id="meal-preview" class="preview-totals"></div>
+          <label class="check-label"
+            ><input type="checkbox" id="review-confirm" /> J’ai vérifié les
+            aliments, portions et hypothèses.</label
+          >
+          <div class="dialog-footer">
+            <button type="button" id="favorite-draft" class="ghost-button">
+              Garder comme habitude ☆</button
+            ><button type="submit" id="save-meal" class="primary-button">
+              Enregistrer mon repas ↗
+            </button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>
