@@ -38,6 +38,9 @@ dans MyMiam. Cette première version accepte uniquement l'utilisateur propriéta
 propre à MyMiam. Chaque requête privée vérifie la session auprès de Renfo.
 Les comptes amis ne peuvent pas accéder au journal ni utiliser le forfait IA.
 Renfo doit rester disponible pour vérifier les sessions.
+Le transport vers Renfo utilise libcurl avec vérification TLS et sans redirection,
+pour transmettre correctement SNI même si l'OpenSSL du système interprète mal
+un hostname sslip.io commençant par une adresse IPv4.
 
 ## Connecter le forfait ChatGPT
 

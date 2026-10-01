@@ -13,6 +13,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
+from curl_cffi import requests as renfo_requests
+from curl_cffi.requests.exceptions import RequestException as RenfoRequestException
 from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -61,10 +63,14 @@ def create_app(config=None):
         if token:
             headers["Cookie"] = "renfo_session=" + token
         try:
-            response = requests.request("POST" if payload is not None else "GET", base + path,
-                                        headers=headers, json=payload, timeout=(5, 12), allow_redirects=False)
+            # The host's OpenSSL 1.1.1 can omit SNI for DNS names beginning
+            # with an IPv4 address, such as Renfo's sslip.io hostname.
+            # libcurl sends SNI correctly and still verifies the certificate.
+            response = renfo_requests.request("POST" if payload is not None else "GET", base + path,
+                                              headers=headers, json=payload, timeout=(5, 12),
+                                              allow_redirects=False, verify=True)
             return response, response.json()
-        except (requests.RequestException, ValueError):
+        except (RenfoRequestException, ValueError):
             raise PlanError("Renfo est momentanément inaccessible. Réessaie dans un instant.")
 
     def authenticated():

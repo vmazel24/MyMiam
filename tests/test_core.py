@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
+from curl_cffi.requests.exceptions import ConnectionError, SSLError
 
 from app import create_app
 from mymiam.dashboard import summary, trends
@@ -26,7 +27,7 @@ class CoreTests(unittest.TestCase):
         self.store = self.app.extensions["store"]
         self.user = {"id": "owner-uuid", "email": "owner@example.test", "legacyOwner": True}
         self.store.bind_owner(self.user["id"])
-        self.remote = patch("app.requests.request", side_effect=self.renfo)
+        self.remote = patch("app.renfo_requests.request", side_effect=self.renfo)
         self.remote.start()
         self.addCleanup(self.remote.stop)
         with self.store.connect() as db:
@@ -68,11 +69,22 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/dashboard').status_code,401)
 
     def test_renfo_outage_fails_closed(self):
-        with patch('app.requests.request',side_effect=__import__('requests').ConnectionError()):
+        with patch('app.renfo_requests.request',side_effect=ConnectionError('connection unavailable')):
             self.assertEqual(self.client.get('/api/dashboard').status_code,503)
 
+    def test_renfo_certificate_failure_fails_closed(self):
+        with patch('app.renfo_requests.request',side_effect=SSLError('certificate rejected')):
+            self.assertEqual(self.client.get('/api/dashboard').status_code,503)
+
+    def test_renfo_tls_verification_and_redirects(self):
+        with patch('app.renfo_requests.request',side_effect=self.renfo) as remote:
+            self.assertEqual(self.client.get('/api/dashboard').status_code,200)
+        self.assertTrue(remote.call_args.kwargs['verify'])
+        self.assertFalse(remote.call_args.kwargs['allow_redirects'])
+        self.assertEqual(remote.call_args.args[1], 'https://95.216.152.157.sslip.io/api/auth/me')
+
     def test_logout_clears_local_session_even_when_renfo_is_down(self):
-        with patch('app.requests.request',side_effect=__import__('requests').ConnectionError()):
+        with patch('app.renfo_requests.request',side_effect=ConnectionError('connection unavailable')):
             response=self.client.post('/api/auth/logout',json={},headers=self.headers)
         self.assertEqual(response.status_code,200)
         with self.store.connect() as db:
