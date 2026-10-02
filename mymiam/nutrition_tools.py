@@ -1,10 +1,12 @@
 """Bounded nutrition tools, with internal catalogue before public research."""
 import requests
+from curl_cffi.requests.exceptions import RequestException as BrowserRequestError
 
 from .catalogue import matches_for
 from .nutrition import finite_number, NUTRIENTS, totals, search_foods
 from .references import lookup_reference, identity_key, recipe_from_components, reference_food
 from .food_research import import_product
+from .published_products import import_published_product
 
 
 def object_schema(properties):
@@ -87,7 +89,7 @@ class NutritionTools:
                     raise ValueError('Recherche invalide')
                 reference = lookup_reference(self.store, query)
                 direct = [] if reference else search_foods(self.store, query, 5)
-                foods = [reference] if reference else direct or matches_for(self.store, query)
+                foods = [reference] if reference else direct or matches_for(self.store, label if isinstance(value, dict) else query)
                 if not reference:
                     with self.store.connect() as db:
                         foods = [reference_food(db, db.execute('SELECT * FROM foods WHERE id=?', (food['id'],)).fetchone())
@@ -136,6 +138,13 @@ class NutritionTools:
                     result['food'] = self.public_food(food)
                 except (ValueError, requests.RequestException):
                     result['nutrition_note'] = 'Fiche produit non importable ; nutriments exacts non vérifiés.'
+            if result.get('found') and result.get('kind') == 'product' and not result.get('food'):
+                try:
+                    food = import_published_product(self.store, query, result)
+                    self.found[food['id']] = food
+                    result['food' if result.get('exact_match') else 'candidate_food'] = self.public_food(food)
+                except (ValueError, BrowserRequestError):
+                    result['nutrition_note'] = 'Tableau fabricant non importable automatiquement ; utiliser une approximation adaptée.'
             return result
         if name == 'save_recipe':
             query = arguments.get('query')
@@ -171,6 +180,14 @@ class NutritionTools:
             values.extend(group.get('options', []))
         for value in values:
             food_id = value.get('food_id')
+            # A best guess may use a reasonable generic candidate already seen
+            # by Luna. Unknown foods still stay unknown; no invented composition.
+            if food_id is None and value in draft.get('items', []):
+                candidates = [f for f in matches_for(self.store, value.get('label', '')) if f['id'] in self.found]
+                if candidates:
+                    value['food_id'] = food_id = candidates[0]['id']
+                    value['composition_estimated'] = True
+                    value['note'] = 'Composition moyenne d’un aliment comparable ; quantité estimée si aucun poids n’est indiqué.'
             if food_id is not None and (not isinstance(food_id, str) or food_id not in self.found):
                 raise ValueError('Aliment non vérifié dans le catalogue')
 

@@ -31,6 +31,14 @@ le nom, les qualificatifs et l'établissement demandés. Une pizza équivalente 
 autre nom n'est PAS un match exact : expliquer la différence dans note. canonical_query
 nomme le vrai produit AVEC marque, ou le vrai plat AVEC restaurant ET ville, sans
 quantité ni repas. L'adresse du fabricant ne fait pas partie du nom d'un produit.
+Un nom courant comme « hachis parmentier » peut désigner la purée de pommes de
+terre à la viande hachée du fabricant : confirmer les ingrédients et la marque,
+et donner le vrai nom publié dans name. Ne pas confondre deux variantes.
+exact_match vérifie les qualificatifs effectivement DONNÉS par l'utilisateur.
+L'absence d'un format, d'une sous-marque ou d'un poids dans sa demande n'impose
+pas exact_match=false. Decathlon commercialise FORCLAZ : un produit FORCLAZ sur
+sa fiche officielle satisfait la marque/distributeur Decathlon. Sans format précisé,
+le sachet courant trouvé sert de meilleure estimation ; annoncer son format dans note.
 Ne déduis pas un poids, une taille ou des nutriments d'une carte qui ne les publie pas.
 Ne donne aucun chiffre nutritionnel. ingredients ne contient que les ingrédients publiés.
 barcode est un code EAN publié sur une fiche produit vérifiée, sinon null.

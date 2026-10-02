@@ -234,6 +234,23 @@ test("journal shows estimated recipe composition and its source link", async ({
     .getByRole("link", { name: "Voir la source" });
   await expect(link).toHaveAttribute("href", "https://example.test/menu");
   await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  const values = page.locator("#journal-meals .food-nutrients");
+  await expect(values).toContainText("260 kcal");
+  await expect(values).toContainText("5,2 g Protéines");
+  await expect(values).toContainText("56 g Glucides");
+  await expect(values).toContainText("0,6 g Lipides");
+  await page.locator("#journal-meals [data-edit]").click();
+  await expect(page.locator("#meal-items .food-nutrients")).toContainText(
+    "260 kcal",
+  );
+  await page.getByLabel("Poids (g)", { exact: true }).fill("100");
+  await expect(page.locator("#meal-items .food-nutrients")).toContainText(
+    "130 kcal",
+  );
+  await page.getByLabel("Poids approximatif", { exact: true }).uncheck();
+  await expect(page.locator("#meal-items .food-nutrients")).toContainText(
+    "130 kcal",
+  );
 });
 
 async function fakeSpeech(page, error = null) {
@@ -273,7 +290,7 @@ test("browser dictation fills text and submits while listening", async ({
   await fakeSpeech(page);
   await page.getByRole("button", { name: "Dicter mon repas" }).click();
   await expect(page.locator("#meal-text")).toHaveValue("Ce soir deux pizzas");
-  await expect(page.locator("#meal-text")).toBeDisabled();
+  await expect(page.locator("#meal-text")).toHaveJSProperty("readOnly", true);
   await page.getByRole("button", { name: "Envoyer à Luna" }).click();
   await expect(page.locator("#meal-dialog")).not.toBeVisible();
   await expect(page.locator("#today-captures")).toContainText(
@@ -348,6 +365,8 @@ test("Android cumulative partials do not duplicate the meal sent to Luna", async
 }) => {
   await fakeAndroidSpeech(page, ["alors ce midi"]);
   await page.getByRole("button", { name: "Dicter mon repas" }).click();
+  await expect(page.locator("#meal-text")).toHaveValue("alors ce midi");
+  await expect(page.locator("#meal-text")).toHaveJSProperty("readOnly", true);
   const sent = page.waitForRequest(
     (request) =>
       request.url().endsWith("/api/captures") && request.method() === "POST",
@@ -373,6 +392,61 @@ test("Android dictation keeps typed text and repeated spoken words across sessio
   await expect(page.locator("#meal-text")).toHaveValue(
     "Ce matin un café. alors ce midi deux pizzas, deux pizzas",
   );
+});
+
+test("Android interim text replaces hypotheses and continues across natural pauses", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", {
+      get: () => "Android Chrome/142",
+    });
+    window.SpeechRecognition = class {
+      constructor() {
+        window.testRecognition = this;
+        this.starts = 0;
+      }
+      start() {
+        this.starts++;
+        this.onstart?.();
+      }
+      emit(text, final = false) {
+        const result = [{ transcript: text }];
+        result.isFinal = final;
+        this.onresult?.({ resultIndex: 0, results: [result] });
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {
+        this.onend?.();
+      }
+    };
+  });
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Ajouter un repas · Midi", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Dicter mon repas" }).click();
+  await page.evaluate(() => window.testRecognition.emit("alors"));
+  await expect(page.locator("#meal-text")).toHaveValue("alors");
+  await page.evaluate(() => window.testRecognition.emit("alors ce midi"));
+  await expect(page.locator("#meal-text")).toHaveValue("alors ce midi");
+  await page.evaluate(() => {
+    window.testRecognition.emit("alors ce midi", true);
+    window.testRecognition.onend();
+  });
+  expect(await page.evaluate(() => window.testRecognition.starts)).toBe(2);
+  await expect(page.locator("#meal-text")).toHaveJSProperty("readOnly", true);
+  await page.evaluate(() =>
+    window.testRecognition.emit("deux pizzas, deux pizzas"),
+  );
+  await expect(page.locator("#meal-text")).toHaveValue(
+    "alors ce midi deux pizzas, deux pizzas",
+  );
+  await page.getByRole("button", { name: "Arrêter la dictée" }).click();
+  await expect(page.locator("#meal-text")).toHaveJSProperty("readOnly", false);
+  expect(await page.evaluate(() => window.testRecognition.starts)).toBe(2);
 });
 
 test("morning midday and evening buttons select their meal period", async ({

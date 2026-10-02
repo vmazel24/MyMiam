@@ -284,13 +284,23 @@ function renderDashboard() {
         .join("") +
       '<p class="muted footnote">Détail des séances ; leurs calories ne sont pas ajoutées au total une seconde fois.</p></div>';
 }
+function nutrientLine(nutrients = {}) {
+  return `<div class="food-nutrients" aria-label="Valeurs pour cette portion">${["kcal", "protein", "carbs", "fat"].map((key) => `<span><strong>${fmt(nutrients[key], key === "kcal" ? 0 : 1)} ${key === "kcal" ? "kcal" : "g"}</strong>${key === "kcal" ? "" : ` ${macroNames[key]}`}</span>`).join("")}</div>`;
+}
 function renderMeals() {
   const meals = [...state.summary.meals].sort(
     (a, b) =>
       Object.keys(slots).indexOf(a.slot) - Object.keys(slots).indexOf(b.slot),
   );
+  const foodMarkup = (items) =>
+    items
+      .map(
+        (i) =>
+          `<div class="meal-food"><p>${escapeHTML(i.label || i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}</p>${nutrientLine(i.nutrients)}<p>${escapeHTML(i.source)}${i.composition_estimated ? " · composition estimée" : ""}${i.source_url && /^https:\/\//i.test(i.source_url) ? ` · <a href="${escapeHTML(i.source_url)}" target="_blank" rel="noopener noreferrer">Voir la source</a>` : ""}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).length ? " · certaines valeurs non chiffrées" : ""}</p></div>`,
+      )
+      .join("");
   const mealMarkup = (m, expanded) =>
-    `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · portions estimées" : ""}</p>${expanded ? m.items.map((i) => `<p>${escapeHTML(i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}<br>${escapeHTML(i.source)}${i.composition_estimated ? " · composition estimée" : ""}${i.source_url && /^https:\/\//i.test(i.source_url) ? ` · <a href="${escapeHTML(i.source_url)}" target="_blank" rel="noopener noreferrer">Voir la source</a>` : ""}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).length ? " · certaines valeurs non chiffrées" : ""}</p>`).join("") : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
+    `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
   const refinements = (meal) =>
     (meal.clarifications || [])
       .map(
@@ -395,7 +405,7 @@ function shiftDay(amount) {
 }
 function editableItem(item) {
   return {
-    label: item.name || item.label || "",
+    label: item.label || item.name || "",
     food_id: item.food_id || null,
     grams: item.grams ?? "",
     estimated: !!item.estimated,
@@ -473,7 +483,7 @@ function renderDraft() {
   $("meal-items").innerHTML = state.draft
     .map(
       (item, index) =>
-        `<div class="review-row" data-index="${index}"><div class="review-grid"><label>Aliment à vérifier<input class="food-query" value="${escapeHTML(item.food?.name || item.label)}" placeholder="Chercher dans Ciqual…" autocomplete="off"></label><label>Poids (g)<input class="food-grams" type="number" min="0.1" max="10000" step="0.1" value="${escapeHTML(item.grams)}" required></label><button type="button" class="remove-food" aria-label="Retirer l’aliment">×</button></div><div class="food-results">${item.matches.length && !item.food ? matchButtons(item.matches) : ""}</div><p class="review-source">${item.food ? escapeHTML(item.food.source) + " · correspondance sélectionnée" : "Choisis une correspondance alimentaire."}</p>${item.note ? `<p class="review-note">${escapeHTML(item.note)}</p>` : ""}<label class="check-label"><input class="food-estimated" type="checkbox" ${item.estimated ? "checked" : ""}> Portion estimée</label></div>`,
+        `<div class="review-row" data-index="${index}"><div class="review-grid"><label>Aliment à vérifier<input class="food-query" value="${escapeHTML(item.label || item.food?.name || "")}" placeholder="Chercher dans Ciqual…" autocomplete="off"></label><label>Poids (g)<input class="food-grams" type="number" min="0.1" max="10000" step="0.1" value="${escapeHTML(item.grams)}" required></label><button type="button" class="remove-food" aria-label="Retirer l’aliment">×</button></div><div class="food-results">${item.matches.length && !item.food ? matchButtons(item.matches) : ""}</div><p class="review-source">${item.food ? escapeHTML(item.food.source) + " · correspondance sélectionnée" : "Choisis une correspondance alimentaire."}</p>${item.note ? `<p class="review-note">${escapeHTML(item.note)}</p>` : ""}<label class="check-label"><input class="food-estimated" type="checkbox" ${item.estimated ? "checked" : ""}> Poids approximatif</label><p class="muted footnote">Coche si le poids est supposé ; décoche si tu l’as pesé ou lu sur l’emballage. Cela ne change pas les calories.</p><div class="item-nutrients"></div></div>`,
     )
     .join("");
   updatePreview();
@@ -490,6 +500,24 @@ function matchButtons(matches) {
   );
 }
 function updatePreview() {
+  state.draft.forEach((item, index) => {
+    const element = $("meal-items").querySelector(
+      `[data-index="${index}"] .item-nutrients`,
+    );
+    if (element)
+      element.innerHTML = nutrientLine(
+        Object.fromEntries(
+          ["kcal", "protein", "carbs", "fat"].map((key) => [
+            key,
+            !item.food ||
+            !Number(item.grams) ||
+            item.food.nutrients[key] == null
+              ? null
+              : (item.food.nutrients[key] * Number(item.grams)) / 100,
+          ]),
+        ),
+      );
+  });
   const values = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
   for (const item of state.draft)
     for (const key of Object.keys(values)) {
@@ -524,6 +552,7 @@ function draftPayload() {
     request_id: state.requestId,
     items: state.draft.map((i) => ({
       food_id: i.food_id,
+      label: i.label,
       grams: Number(i.grams),
       estimated: i.estimated,
       note: i.note,
@@ -555,7 +584,7 @@ async function parseMeal() {
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition;
 function resetDictationUI() {
-  $("meal-text").disabled = false;
+  $("meal-text").readOnly = false;
   $("dictate-meal").textContent = "🎙 Dicter mon repas";
   $("dictate-meal").setAttribute("aria-pressed", "false");
 }
@@ -567,6 +596,7 @@ function abortDictation() {
 }
 async function stopDictation() {
   if (!recognition) return;
+  recognition.stopRequested = true;
   try {
     recognition.stop();
   } catch {
@@ -588,13 +618,15 @@ $("dictate-meal").addEventListener("click", async () => {
   const active = new SpeechRecognition();
   recognition = active;
   active.lang = "fr-FR";
-  active.continuous = true;
-  // Android Chromium marks continuous-mode partials as final, so their growing
-  // transcripts accumulate in results. Request final-only input on that platform.
+  // Android continuous recognition promotes growing partials to final results.
+  // Recognize one utterance at a time and restart after natural pauses instead.
   const android = /Android/i.test(navigator.userAgent);
-  active.interimResults = !android;
+  active.continuous = !android;
+  active.interimResults = true;
   active.maxAlternatives = 1;
   const prefix = $("meal-text").value.trim();
+  const completed = [];
+  let utterance = "";
   let hadError = false;
   let finish;
   const limit = setTimeout(() => {
@@ -605,20 +637,19 @@ $("dictate-meal").addEventListener("click", async () => {
   });
   active.onstart = () => {
     if (recognition !== active) return;
-    $("meal-text").disabled = true;
+    $("meal-text").readOnly = true;
     $("dictate-meal").textContent = "■ Arrêter la dictée";
     $("dictate-meal").setAttribute("aria-pressed", "true");
-    $("dictation-status").textContent = android
-      ? "Je t’écoute. Le texte apparaîtra à la fin de la dictée."
-      : "Je t’écoute. Dis ton repas et son moment, puis envoie à Luna.";
+    $("dictation-status").textContent =
+      "Je t’écoute. Dis ton repas et son moment, puis envoie à Luna.";
   };
   active.onresult = (event) => {
     if (recognition !== active) return;
-    const text = Array.from(
-      event.results,
-      (result) => result[0].transcript,
-    ).join(" ");
-    $("meal-text").value = [prefix, text]
+    const results = Array.from(event.results, (result) => result[0].transcript);
+    // A single Android utterance is replaced by its newest hypothesis, never
+    // concatenated with earlier versions. Keep genuine repeated spoken words.
+    utterance = android ? results.at(-1) || "" : results.join(" ");
+    $("meal-text").value = [prefix, ...completed, utterance]
       .filter(Boolean)
       .join(" ")
       .slice(0, 4000);
@@ -626,6 +657,7 @@ $("dictate-meal").addEventListener("click", async () => {
   active.onerror = (event) => {
     if (recognition !== active) return;
     hadError = true;
+    active.stopRequested = true;
     $("dictation-status").textContent =
       {
         "not-allowed":
@@ -639,6 +671,23 @@ $("dictate-meal").addEventListener("click", async () => {
       "La dictée s’est arrêtée. Ton texte est conservé ; tu peux réessayer.";
   };
   active.onend = () => {
+    if (
+      android &&
+      recognition === active &&
+      !active.stopRequested &&
+      !hadError
+    ) {
+      if (utterance.trim()) completed.push(utterance.trim());
+      utterance = "";
+      try {
+        active.start();
+        return;
+      } catch {
+        hadError = true;
+        $("dictation-status").textContent =
+          "La dictée s’est arrêtée. Ton texte est conservé.";
+      }
+    }
     clearTimeout(limit);
     if (recognition === active) {
       recognition = null;

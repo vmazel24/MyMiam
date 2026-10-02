@@ -67,7 +67,8 @@ def remember(store, query, name, nutrients, reference, food_id=None, flags=None,
         raise ValueError('Identité alimentaire invalide')
     food_id = food_id or 'reference:' + hashlib.sha256(key.encode()).hexdigest()[:24]
     reference = dict(reference, saved_at=datetime.now(timezone.utc).isoformat())
-    source = 'Recette estimée · catalogue personnel' if reference['kind'] == 'recipe' else 'Open Food Facts · ODbL'
+    source = {'recipe': 'Recette estimée · catalogue personnel',
+              'published_product': 'Fiche nutritionnelle du fabricant'}.get(reference['kind'], 'Open Food Facts · ODbL')
     with store.connect() as db:
         # Never silently change an existing reference's composition.
         db.execute('''INSERT INTO foods VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET

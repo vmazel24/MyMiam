@@ -25,12 +25,25 @@ vérification obligatoire avant toute substitution générique. Après cette vé
   ces candidats ne prouvent jamais que le produit ou le restaurant est identifié.
   Les aliments courants peuvent être choisis directement dans Ciqual ; pour une
   pizza sans garniture précisée, préférer « Pizza (aliment moyen) ».
+  Si la garniture exacte n'existe pas, chercher une pizza proche ou cette moyenne.
+  Une glace sans parfums précisés utilise une glace moyenne ; une bière blonde
+  sans degré indiqué utilise une bière courante à 4–5°. Réessayer avec ces noms
+  génériques plutôt que laisser ces aliments courants sans calories.
 - Pour une marque/recette/établissement sans match sûr, appeler `nutrition.research_food`
   avec la même recherche complète déjà passée à `search_foods`. L'outil fait consulter
   le web à Luna via le forfait ChatGPT, sans compte tiers ni clé API supplémentaire.
   Il renvoie une identité, les ingrédients publiés, la source et les incertitudes.
   Les fiches Open Food Facts vérifiées et importables sont mémorisées automatiquement :
   utiliser alors `food.food_id` et les données importées, sans réinventer leurs valeurs.
+  Le serveur importe aussi les tableaux des fiches Decathlon vérifiées, même sans
+  code-barres. Quand `food` est fourni, l'utiliser en priorité sur Ciqual, avec la
+  portion et la base sec/préparé publiées dans `reference`. Pour les autres fabricants,
+  l'import de tableau peut rester indisponible : l'outil l'indique explicitement.
+  `candidate_food` est le produit réellement trouvé avec ses valeurs publiées,
+  sans affirmer qu'il correspond exactement à la demande. Si son état (sec/cuit),
+  sa recette et les qualificatifs demandés conviennent, l'utiliser comme meilleure
+  estimation et expliquer la variante/portion supposée. Proposer une précision
+  facultative si nécessaire. Ne pas le substituer à une variante incompatible.
 - Pour un restaurant avec `found=true`, `exact_match=true`, rechercher les ingrédients
   dans Ciqual (appel groupé), estimer leurs masses comestibles dans UNE portion prête
   à manger, puis appeler `nutrition.save_recipe` avec la recherche d'origine et leurs

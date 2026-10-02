@@ -6,9 +6,10 @@ from datetime import datetime, timezone
 
 import requests
 
-from .nutrition import NUTRIENTS, finite_number, normalize, resolve_items, food_record
+from .nutrition import NUTRIENTS, finite_number, normalize, resolve_items
 from .openai_plan import PlanError
 from .catalogue import matches_for
+from .references import reference_food
 
 ACTIVE = ('queued', 'analysing')
 SLOTS = {'breakfast', 'lunch', 'dinner', 'snack'}
@@ -21,9 +22,9 @@ def selected_matches(store, value, label):
         return []
     with store.connect() as db:
         row = db.execute('SELECT * FROM foods WHERE id=?', (str(value['food_id']),)).fetchone()
-    if not row:
-        raise ValueError('Aliment du catalogue introuvable')
-    return [food_record(row)]
+        if not row:
+            raise ValueError('Aliment du catalogue introuvable')
+        return [reference_food(db, row)]
 
 
 def prepare_draft(store, draft, context=None):
@@ -48,8 +49,18 @@ def prepare_draft(store, draft, context=None):
         item.update(label=label, matches=matches, food_id=matches[0]['id'],
                     grams=finite_number(item.get('grams'), 0.1, 10000, 'Quantité estimée'),
                     note=str(item.get('note', ''))[:300], estimated=bool(item.get('estimated')))
+        reference = matches[0].get('reference', {})
+        if reference.get('kind') == 'published_product' and reference.get('weight_basis') == 'dry':
+            # Describe published facts without claiming the user weighed a pouch.
+            item['note'] = 'Valeurs du fabricant calculées sur le poids sec.'
+            if reference.get('portion_grams'):
+                item['note'] += f" Format trouvé : sachet de {reference['portion_grams']:g} g."
+            if item['estimated']:
+                item['note'] += f" Quantité supposée : {item['grams']:g} g secs."
     hint = (context or {}).get('slot_hint')
     draft['slot'] = draft.get('slot') if draft.get('slot') in SLOTS else hint if hint in SLOTS else 'lunch'
+    for item in draft['items']:
+        item['slot'] = item.get('slot') if item.get('slot') in SLOTS else draft['slot']
     draft['questions'] = []
     refinements = []
     refined_items = set()
@@ -93,6 +104,22 @@ def prepare_draft(store, draft, context=None):
     return draft
 
 
+def split_draft(draft):
+    """Partition once by narrated period, preserving every item and its options."""
+    groups = []
+    for slot, title in [('breakfast', 'Matin'), ('lunch', 'Midi'), ('dinner', 'Soir'), ('snack', 'Collation')]:
+        indexes = [i for i, item in enumerate(draft['items']) if item['slot'] == slot]
+        if not indexes:
+            continue
+        remap = {original: local for local, original in enumerate(indexes)}
+        groups.append({'slot': slot, 'title': title, 'items': [draft['items'][i] for i in indexes],
+                       'clarifications': [{**g, 'item_index': remap[g['item_index']]}
+                                          for g in draft['clarifications'] if g['item_index'] in remap]})
+    if len(groups) == 1:
+        groups[0]['title'] = str(draft.get('title') or groups[0]['title'])[:120]
+    return groups
+
+
 def favorite_context(store, user_id):
     with store.connect() as db:
         return [{'name': r['title'], 'items': [{'label': i['name'], 'grams': i['grams']} for i in json.loads(r['items'])]}
@@ -116,16 +143,19 @@ class CaptureWorker:
             text = job['text']
             context = {'day': job['day'], 'slot_hint': job['slot_hint'], 'local_hour': datetime.now().hour}
             draft = prepare_draft(self.store, self.plan.parse(text, favorite_context(self.store, job['user_id']), context), context)
-            items = resolve_items(self.store, draft['items'])
+            groups = [(group, resolve_items(self.store, group['items'])) for group in split_draft(draft)]
             with self.store.connect() as db:
                 db.execute('BEGIN IMMEDIATE')
                 row = db.execute('SELECT status FROM captures WHERE id=?', (job['id'],)).fetchone()
                 if not row or row[0] == 'cancelled':
                     return True
-                db.execute('INSERT OR IGNORE INTO meals VALUES (?,?,?,?,?,?,?,?,?)',
-                    (job['id'], job['user_id'], job['day'], draft['slot'], str(draft.get('title') or 'Mon repas')[:120],
-                     text, json.dumps(items), datetime.now(timezone.utc).isoformat(), 'capture_' + job['id']))
-                db.execute('INSERT OR REPLACE INTO meal_insights VALUES (?,?)', (job['id'], json.dumps(draft['clarifications'])))
+                for index, (group, items) in enumerate(groups):
+                    meal_id = job['id'] if index == 0 else str(uuid.uuid5(uuid.NAMESPACE_URL, job['id'] + ':' + group['slot']))
+                    inserted = db.execute('INSERT OR IGNORE INTO meals VALUES (?,?,?,?,?,?,?,?,?)',
+                        (meal_id, job['user_id'], job['day'], group['slot'], group['title'],
+                         text, json.dumps(items), datetime.now(timezone.utc).isoformat(), 'capture_' + meal_id))
+                    if inserted.rowcount:
+                        db.execute('INSERT INTO meal_insights VALUES (?,?)', (meal_id, json.dumps(group['clarifications'])))
                 self.store.refresh_day(db, job['user_id'], job['day'])
                 db.execute("UPDATE captures SET status='done',meal_id=?,text=?,error=NULL,updated=? WHERE id=?",
                            (job['id'], text, time.time(), job['id']))

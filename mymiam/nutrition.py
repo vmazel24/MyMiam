@@ -90,9 +90,12 @@ def resolve_items(store, inputs):
             reference_row = db.execute('SELECT data FROM food_references WHERE food_id=?', (food['id'],)).fetchone()
             reference = json.loads(reference_row[0]) if reference_row else None
             result.append({"food_id": food["id"], "name": food["name"], "source": food["source"],
+                           "label": str(item.get('label') or item.get('name') or food['name'])[:150],
                            "grams": grams, "estimated": bool(item.get("estimated", False)),
                            "source_url": reference.get('source_url') if reference else None,
-                           "composition_estimated": bool(reference and reference.get('composition_estimated')),
+                           "composition_estimated": bool(item.get('composition_estimated') or
+                               reference and reference.get('composition_estimated') or
+                               food['source'].startswith('Ciqual') and 'aliment moyen' in normalize(food['name'])),
                            "note": str(item.get("note", ""))[:300], "flags": food["flags"],
                            "nutrients": {k: None if food["nutrients"].get(k) is None else
                                          round(food["nutrients"][k] * grams / 100, 3) for k in NUTRIENTS}})

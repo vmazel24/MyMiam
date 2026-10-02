@@ -142,3 +142,52 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.post('/api/meals/' + capture_id + '/refine',
             json={'group': 0, 'option': 1}, headers=self.headers).status_code, 409)
+
+    def test_one_narrative_splits_periods_preserves_foods_and_remaps_options(self):
+        draft = self.draft()
+        draft['items'] = [{**draft['items'][0], 'slot': slot, 'label': label}
+                          for slot, label in [('lunch', 'Riz blanc cuit'), ('dinner', 'Riz blanc cuit')]]
+        draft['clarifications'][0]['item_index'] = 1
+        self.plan.parse.return_value = draft
+        capture_id = self.capture(text='A midi du riz et ce soir du riz').json['id']
+        self.worker.process_one()
+        meals = summary(self.store, self.user['id'], self.day)['meals']
+        by_slot = {meal['slot']: meal for meal in meals}
+        self.assertEqual(set(by_slot), {'lunch', 'dinner'})
+        self.assertEqual(sum(len(meal['items']) for meal in meals), 2)
+        self.assertEqual(by_slot['lunch']['clarifications'], [])
+        self.assertEqual(by_slot['dinner']['clarifications'][0]['item_index'], 0)
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['intake']['kcal'], 520)
+        self.assertEqual(self.client.post('/api/meals/' + by_slot['dinner']['id'] + '/refine',
+            json={'group': 0, 'option': 2}, headers=self.headers).status_code, 200)
+        # A recovered job cannot duplicate periods or overwrite edited portions.
+        with self.store.connect() as db:
+            db.execute("UPDATE captures SET status='queued' WHERE id=?", (capture_id,))
+        self.worker.process_one()
+        day = summary(self.store, self.user['id'], self.day)
+        self.assertEqual(len(day['meals']), 2)
+        self.assertEqual(day['intake']['kcal'], 650)
+
+    def test_cancelled_multi_period_narrative_saves_nothing(self):
+        capture_id = self.capture().json['id']
+        def cancelled(*args):
+            self.client.delete('/api/captures/' + capture_id, json={}, headers=self.headers)
+            draft = self.draft()
+            draft['items'] = [{**draft['items'][0], 'slot': slot} for slot in ('lunch', 'dinner')]
+            return draft
+        self.plan.parse.side_effect = cancelled
+        self.worker.process_one()
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['meals'], [])
+
+    def test_multi_period_failure_rolls_back_the_whole_journal_write(self):
+        draft = self.draft()
+        draft['items'] = [{**draft['items'][0], 'slot': slot} for slot in ('lunch', 'dinner')]
+        self.plan.parse.return_value = draft
+        capture_id = self.capture().json['id']
+        with self.store.connect() as db:
+            db.execute("CREATE TRIGGER reject_test_dinner BEFORE INSERT ON meals WHEN NEW.slot='dinner' BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+        self.worker.process_one()
+        self.assertEqual(self.job(capture_id)['status'], 'failed')
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['meals'], [])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM meal_insights').fetchone()[0], 0)

@@ -252,6 +252,21 @@ Facts : le serveur lit les nutriments par 100 g, conserve les bornes/traces comm
 inconnues et refuse un produit dont l'identité ne correspond pas. La même fonction
 sert à la recherche manuelle par code-barres, dont les références sont mémorisées.
 
+Les tableaux des fiches produit Decathlon vérifiées sont aussi importés, sans
+code-barres : le serveur télécharge la page publique et extrait ses valeurs,
+sa portion et sa base sèche pour les lyophilisés. Luna ne fournit aucun chiffre
+nutritionnel à cet import. Les autres fabricants passent actuellement par Open
+Food Facts ou une approximation signalée. Les valeurs non publiées restent inconnues.
+
+Une seule saisie peut contenir plusieurs créneaux : chaque aliment porte son
+créneau et le journal reçoit des repas séparés, enregistrés ensemble. Les calories
+et macros par portion sont visibles dans les aliments du journal et leur éditeur.
+« Poids approximatif » signale un poids supposé et ne change pas le calcul.
+
+La dictée affiche ses résultats provisoires dans un champ en lecture seule.
+Sur Android, la reconnaissance reprend après les pauses en séparant les phrases,
+pour éviter l'accumulation des hypothèses partielles dans le mode continu.
+
 Une recette de restaurant vérifiée peut être mémorisée par `nutrition.save_recipe` :
 Luna sélectionne les ingrédients du catalogue et estime leurs masses comestibles
 pour une portion. Le serveur calcule la composition à partir de ces ingrédients.

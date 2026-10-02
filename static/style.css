@@ -592,6 +592,28 @@ p + p {
   margin-top: 5px;
   color: var(--muted);
 }
+.food-nutrients {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 7px 0;
+}
+.food-nutrients strong {
+  color: var(--ink);
+}
+.meal-food {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.meal-food-details summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 9px;
+}
 .meal-calories {
   font: 900 26px var(--display);
   white-space: nowrap;

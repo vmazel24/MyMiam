@@ -216,7 +216,9 @@ class NutritionToolTests(unittest.TestCase):
             return responses.pop(0)
         with patch('mymiam.openai_plan.requests.post',side_effect=post):
             result=self.plan.parse('Une pizza Auchan',[])
-        self.assertIsNone(result['items'][0]['food_id'])
+        self.assertEqual(result['items'][0]['food_id'], 'average')
+        self.assertTrue(result['items'][0]['composition_estimated'])
+        self.assertIn('Composition moyenne', result['items'][0]['note'])
         self.assertEqual(len(sent),5)
         self.assertEqual(sent[2]['tool_choice'],'required')
         self.assertTrue(any(item.get('role')=='developer' for item in sent[2]['input']))

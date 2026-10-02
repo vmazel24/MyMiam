@@ -182,7 +182,8 @@ class ChatGPTPlan:
                   "required": ["title", "slot", "items", "clarifications"], "properties": {
                     "title": {"type": "string"}, "slot": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
                     "items": {"type": "array", "items": {"type": "object", "additionalProperties": False,
-                        "required": ["label", "food_id", "grams", "estimated", "note"], "properties": {
+                        "required": ["label", "slot", "food_id", "grams", "estimated", "note"], "properties": {
+                            "slot": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
                             "food_id": {"type": ["string", "null"]},
                             "label": {"type": "string"}, "grams": {"type": "number"},
                             "estimated": {"type": "boolean"}, "note": {"type": "string"}}}},

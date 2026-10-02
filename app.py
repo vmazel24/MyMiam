@@ -460,6 +460,7 @@ def create_app(config=None):
             items = json.loads(meal['items'])
             index = group['item_index']
             items[index] = resolve_items(store, [{**items[index], **option, 'estimated': True,
+                'label': items[index].get('label') or items[index]['name'],
                 'note': group['label'] + ' · ' + option['label']}])[0]
             group['selected'] = option_index
             db.execute('UPDATE meals SET items=? WHERE id=?', (json.dumps(items), meal_id))
