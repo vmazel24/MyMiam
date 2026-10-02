@@ -589,7 +589,10 @@ $("dictate-meal").addEventListener("click", async () => {
   recognition = active;
   active.lang = "fr-FR";
   active.continuous = true;
-  active.interimResults = true;
+  // Android Chromium marks continuous-mode partials as final, so their growing
+  // transcripts accumulate in results. Request final-only input on that platform.
+  const android = /Android/i.test(navigator.userAgent);
+  active.interimResults = !android;
   active.maxAlternatives = 1;
   const prefix = $("meal-text").value.trim();
   let hadError = false;
@@ -605,8 +608,9 @@ $("dictate-meal").addEventListener("click", async () => {
     $("meal-text").disabled = true;
     $("dictate-meal").textContent = "■ Arrêter la dictée";
     $("dictate-meal").setAttribute("aria-pressed", "true");
-    $("dictation-status").textContent =
-      "Je t’écoute. Dis ton repas et son moment, puis envoie à Luna.";
+    $("dictation-status").textContent = android
+      ? "Je t’écoute. Le texte apparaîtra à la fin de la dictée."
+      : "Je t’écoute. Dis ton repas et son moment, puis envoie à Luna.";
   };
   active.onresult = (event) => {
     if (recognition !== active) return;

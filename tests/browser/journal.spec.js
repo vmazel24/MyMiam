@@ -294,6 +294,87 @@ test("microphone permission failure keeps the typed meal editable", async ({
   await expect(page.locator("#meal-text")).toBeEnabled();
 });
 
+async function fakeAndroidSpeech(page, phrases) {
+  await page.addInitScript((phrases) => {
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      get: () =>
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/142.0 Mobile Safari/537.36",
+    });
+    let session = 0;
+    window.SpeechRecognition = class {
+      constructor() {
+        this.phrase = phrases[session++];
+        this.results = [];
+      }
+      emit(transcript, isFinal) {
+        const result = [{ transcript }];
+        result.isFinal = isFinal;
+        this.results.push(result);
+        this.onresult?.({
+          resultIndex: this.results.length - 1,
+          results: this.results,
+        });
+      }
+      start() {
+        this.onstart?.();
+        if (this.interimResults) {
+          // Android Chromium promotes continuous-mode partials to final results.
+          for (const text of ["alors", "alors", "alors ce", this.phrase])
+            this.emit(text, this.continuous);
+        }
+      }
+      stop() {
+        this.ending = setTimeout(() => {
+          this.emit(this.phrase, true);
+          this.onend?.();
+        }, 100);
+      }
+      abort() {
+        clearTimeout(this.ending);
+        this.onend?.();
+      }
+    };
+  }, phrases);
+  await page.reload();
+  await expect(page.locator("#app")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Ajouter un repas · Midi", exact: true })
+    .click();
+}
+
+test("Android cumulative partials do not duplicate the meal sent to Luna", async ({
+  page,
+}) => {
+  await fakeAndroidSpeech(page, ["alors ce midi"]);
+  await page.getByRole("button", { name: "Dicter mon repas" }).click();
+  const sent = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/api/captures") && request.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Envoyer à Luna" }).click();
+  expect((await sent).postDataJSON().text).toBe("alors ce midi");
+  await expect(page.locator("#meal-dialog")).not.toBeVisible();
+  await expect(page.locator("#today-captures")).toContainText("alors ce midi");
+});
+
+test("Android dictation keeps typed text and repeated spoken words across sessions", async ({
+  page,
+}) => {
+  await fakeAndroidSpeech(page, ["alors ce midi", "deux pizzas, deux pizzas"]);
+  await page.locator("#meal-text").fill("Ce matin un café.");
+  await page.getByRole("button", { name: "Dicter mon repas" }).click();
+  await page.getByRole("button", { name: "Arrêter la dictée" }).click();
+  await expect(page.locator("#meal-text")).toHaveValue(
+    "Ce matin un café. alors ce midi",
+  );
+  await page.getByRole("button", { name: "Dicter mon repas" }).click();
+  await page.getByRole("button", { name: "Arrêter la dictée" }).click();
+  await expect(page.locator("#meal-text")).toHaveValue(
+    "Ce matin un café. alors ce midi deux pizzas, deux pizzas",
+  );
+});
+
 test("morning midday and evening buttons select their meal period", async ({
   page,
 }) => {

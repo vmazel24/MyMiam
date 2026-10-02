@@ -86,6 +86,13 @@ utilisables. HTTPS et `Permissions-Policy: microphone=(self)` sont nécessaires.
 Le modèle Luna connecté accepte le texte, sans entrée audio directe.
 [Modalités du modèle](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
 
+Sur Android, la dictée demande uniquement les résultats définitifs ; le texte
+apparaît à la fin de la reconnaissance ou après « Arrêter la dictée ». Cela évite
+l'accumulation des transcriptions partielles que Chromium marque comme finales
+en mode continu. Les répétitions réellement prononcées et le texte déjà saisi
+sont conservés. Sur ordinateur, l'aperçu pendant la dictée reste disponible.
+[Comportement de Chromium Android](https://github.com/chromium/chromium/blob/main/content/public/android/java/src/org/chromium/content/browser/SpeechRecognitionImpl.java).
+
 **Envoyer à Luna** ferme le formulaire dès que l'envoi est conservé. Un worker
 traite une file SQLite persistante, enregistre la meilleure estimation sans
 question ni confirmation et déduit Matin/Midi/Soir/Collation depuis le texte.
