@@ -17,6 +17,7 @@ import requests
 from .skills import meal_instructions
 from .nutrition_tools import NutritionTools, TOOLS
 from .storage import Store
+from .food_research import research
 
 ISSUER = "https://auth.openai.com"
 TOKEN_ENDPOINT = ISSUER + "/api/accounts/oauth/token"
@@ -196,20 +197,32 @@ class ChatGPTPlan:
                    "input": [{"role": "user", "content": text}], "reasoning": {"effort": "low"},
                    "text": {"format": {"type": "json_schema", "name": "meal", "strict": True, "schema": schema}},
                    "store": False, "stream": True}
-        nutrition = NutritionTools(self.store or Store(self.directory))
+        usage = {}
+        research_responses = 0
+        token = None
+        def research_public(query):
+            nonlocal research_responses
+            research_responses += 1
+            try:
+                return research(self.response, token, model, query, usage)
+            except (PlanError, ValueError, requests.RequestException):
+                return {'found': False, 'exact_match': False,
+                        'note': 'La source externe n’a pas pu être vérifiée ; conserver une approximation visible.'}
+        nutrition = NutritionTools(self.store or Store(self.directory), researcher=research_public)
         payload['tools'] = TOOLS
         payload['tool_choice'] = 'required'
         payload['include'] = ['reasoning.encrypted_content']
-        usage = {}
         calls = 0
         started = time.monotonic()
         with self.locked():
             token = self.access_token()
-            # Three bounded tool turns followed by a tools-disabled final turn.
-            for turn in range(4):
-                if time.monotonic() - started > 180:
+            # Simple captures keep the short loop. Public recipe research may need
+            # ingredient lookup and persistence, so gets three additional turns.
+            for turn in range(7):
+                if time.monotonic() - started > 240:
                     raise PlanError("L'analyse a pris trop de temps. Ton envoi est conservé.")
-                if turn == 3:
+                final_turn = 6 if nutrition.external_count else 3
+                if turn >= final_turn:
                     payload['tool_choice'] = 'none'
                 body, output, text = self.response(payload, token)
                 for key, value in body.get('usage', {}).items():
@@ -217,21 +230,34 @@ class ChatGPTPlan:
                         usage[key] = usage.get(key, 0) + value
                 tool_calls = [item for item in output if item.get('type') == 'function_call']
                 if tool_calls:
-                    if turn == 3 or calls + len(tool_calls) > 6:
+                    if payload['tool_choice'] == 'none' or turn >= final_turn or calls + len(tool_calls) > 12:
                         raise PlanError("Luna a dépassé la limite de recherches. Ton envoi est conservé.")
                     # Stateless HTTP: replay completed calls and encrypted reasoning,
                     # then attach client-executed results; no previous_response_id.
                     payload['input'].extend(output)
+                    all_references = True
                     for call in tool_calls:
                         calls += 1
                         try:
                             result = nutrition.execute(call.get('name', ''), json.loads(call.get('arguments', '{}')),
                                                        call.get('namespace'))
-                        except (ValueError, TypeError):
-                            result = {'error': 'Recherche/portion invalide ou outil indisponible. Utilise les outils nutrition déclarés et les identifiants retournés.'}
+                        except (ValueError, TypeError) as error:
+                            result = {'error': str(error)[:250]}
+                        all_references = all_references and bool(result.get('results')) and all(
+                            value.get('reference_match') for value in result.get('results', []))
                         payload['input'].append({'type': 'function_call_output', 'call_id': call['call_id'],
                                                  'output': json.dumps(result, ensure_ascii=False)})
-                    payload['tool_choice'] = 'auto'
+                    payload['tool_choice'] = 'none' if all_references else 'auto'
+                    continue
+                pending = nutrition.pending_research()
+                if pending:
+                    if turn >= final_turn:
+                        raise PlanError("Une référence nommée n'a pas été vérifiée. Ton envoi est conservé.")
+                    payload['input'].extend(output)
+                    payload['input'].append({'role': 'developer', 'content':
+                        'Les références nommées suivantes doivent passer par nutrition.research_food '
+                        'avant une fiche finale, même pour une approximation : ' + json.dumps(pending, ensure_ascii=False)})
+                    payload['tool_choice'] = 'required'
                     continue
                 try:
                     draft = json.loads(text)
@@ -240,7 +266,8 @@ class ChatGPTPlan:
                     raise PlanError("Luna n'a pas fourni une fiche vérifiée dans le catalogue. Ton envoi est conservé.")
                 protected_write(self.directory / 'last_usage.json', {
                     'model': model, 'at': time.time(), 'usage': usage,
-                    'tool_calls': calls, 'tools': nutrition.calls, 'response_count': turn + 1})
+                    'tool_calls': calls, 'tools': nutrition.calls,
+                    'response_count': turn + 1 + research_responses})
                 return draft
         raise PlanError("La connexion Luna s'est interrompue. Le repas n'a pas été enregistré.")
 
@@ -269,6 +296,10 @@ class ChatGPTPlan:
                 elif kind == 'response.output_item.done':
                     completed_items[event['output_index']] = event['item']
                 elif kind in ('response.failed', 'response.incomplete', 'error'):
+                    error = event.get('response', {}).get('error') or event.get('error') or {}
+                    if error.get('code') in ('subscription_sharing_usage_limit_exceeded',
+                                             'rate_limit_exceeded', 'insufficient_quota'):
+                        raise PlanError("Limite d’usage ChatGPT atteinte pour les applications. Ton envoi est conservé ; réessaie après son renouvellement ou utilise la saisie manuelle.")
                     raise PlanError("Interprétation incomplète ou quota indisponible. Le repas n'a pas été enregistré.")
                 elif kind == 'response.completed':
                     body = event['response']

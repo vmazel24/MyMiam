@@ -56,6 +56,22 @@ class CoreTests(unittest.TestCase):
         for path in ("/api/dashboard","/api/profile","/api/integrations","/api/export","/api/favorites"):
             self.assertEqual(self.client.get(path).status_code,401)
 
+    def test_barcode_import_is_cached_and_preserves_bounded_nutrients(self):
+        remote=SimpleNamespace(status_code=200,json=lambda:{'product':{
+            'product_name':'Fromage blanc 0%', 'brands':'Auchan', 'nutriments':{
+                'energy-kcal_100g':46,'proteins_100g':7.5,'carbohydrates_100g':4,
+                'fat_100g':0.5,'fat_modifier':'<'}}})
+        with patch('mymiam.food_research.requests.get',return_value=remote) as get:
+            first=self.client.get('/api/foods/barcode/3596710402380')
+            second=self.client.get('/api/foods/barcode/3596710402380')
+        self.assertEqual(first.status_code,200)
+        self.assertEqual(second.status_code,200)
+        self.assertEqual(get.call_count,1)
+        food=first.json['food']
+        self.assertIsNone(food['nutrients']['fat'])
+        self.assertIsNone(food['nutrients']['fiber'])
+        self.assertEqual(food['reference']['source_url'],'https://world.openfoodfacts.org/product/3596710402380')
+
     def test_wrong_and_missing_origin_rejected(self):
         for headers in ({}, {"Origin":"https://evil.test"}):
             self.assertEqual(self.client.put('/api/profile',json=self.profile,headers=headers).status_code,403)

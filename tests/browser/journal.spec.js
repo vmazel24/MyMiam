@@ -80,6 +80,8 @@ test.beforeEach(async ({ page }) => {
                   estimated: true,
                   note: "Portion estimée",
                   source: food.source,
+                  source_url: "https://example.test/menu",
+                  composition_estimated: true,
                   flags: {},
                   nutrients,
                 },
@@ -210,6 +212,28 @@ test("capture closes immediately, inferred evening meal and optional refinement"
     path: info.outputPath("dashboard.png"),
     fullPage: true,
   });
+});
+
+test("journal shows estimated recipe composition and its source link", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Ajouter un repas · Soir", exact: true })
+    .click();
+  await page.locator("#meal-text").fill("Ce soir du riz");
+  await page.getByRole("button", { name: "Envoyer à Luna" }).click();
+  await expect(page.locator("#intake-kcal")).toContainText("260", {
+    timeout: 10000,
+  });
+  await page.locator('.nav-button[data-view="journal"]').click();
+  await expect(page.locator("#view-journal")).toContainText(
+    "composition estimée",
+  );
+  const link = page
+    .locator("#view-journal")
+    .getByRole("link", { name: "Voir la source" });
+  await expect(link).toHaveAttribute("href", "https://example.test/menu");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
 });
 
 async function fakeSpeech(page, error = null) {

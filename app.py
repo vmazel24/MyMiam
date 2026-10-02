@@ -25,6 +25,8 @@ from mymiam.garmin import GarminConnector
 from mymiam.nutrition import finite_number, food_record, normalize, resolve_items, search_foods, totals, valid_day, validate_profile
 from mymiam.openai_plan import ChatGPTPlan, PlanError
 from mymiam.storage import Store
+from mymiam.food_research import import_product
+from mymiam.references import reference_food
 
 ROOT = Path(__file__).resolve().parent
 SLOTS = {"breakfast", "lunch", "dinner", "snack"}
@@ -202,27 +204,14 @@ def create_app(config=None):
     def barcode_lookup(barcode):
         if not re.fullmatch(r"\d{8,14}", barcode):
             raise ValueError("Code-barres invalide")
-        if limited("barcode:" + g.user["id"], 30, 60):
-            return jsonify(error="Patiente avant une nouvelle recherche produit"), 429
-        response = requests.get("https://world.openfoodfacts.org/api/v2/product/" + barcode,
-                                params={"fields": "product_name,brands,nutriments,nutrition_data_per,nutrition_data_prepared_per"},
-                                headers={"User-Agent": "MyMiam/0.1 (personal open-source nutrition tracker; https://github.com/vmazel24/MyMiam)"}, timeout=12)
-        if response.status_code != 200:
-            raise ValueError("Produit non trouvé ou Open Food Facts indisponible")
-        product = response.json().get("product")
-        if not product:
-            raise ValueError("Produit non trouvé")
-        raw = product.get("nutriments", {})
-        nutrients = {}
-        for key, field in (("kcal", "energy-kcal"), ("protein", "proteins"), ("carbs", "carbohydrates"), ("fat", "fat"), ("fiber", "fiber")):
-            value = raw.get(field + "_100g")
-            nutrients[key] = None if value is None else finite_number(value, 0, 1000 if key == "kcal" else 100, "Nutriments du produit")
-        name = str(product.get("product_name") or barcode) + " · " + str(product.get("brands", ""))
         with store.connect() as db:
-            db.execute("INSERT OR REPLACE INTO foods VALUES (?,?,?,?,?,?)", (
-                "off:" + barcode, name[:300], normalize(name), "Open Food Facts · ODbL", json.dumps(nutrients), json.dumps({k: "Valeur absente" for k,v in nutrients.items() if v is None})))
             row = db.execute("SELECT * FROM foods WHERE id=?", ("off:" + barcode,)).fetchone()
-        return jsonify(food=food_record(row))
+            reference = db.execute("SELECT 1 FROM food_references WHERE food_id=?", ("off:" + barcode,)).fetchone()
+            if row and reference:
+                return jsonify(food=reference_food(db, row))
+        if limited("barcode:" + g.user["id"], 15, 60):
+            return jsonify(error="Patiente avant une nouvelle recherche produit"), 429
+        return jsonify(food=import_product(store, barcode))
 
     @app.get("/api/profile")
     def profile():

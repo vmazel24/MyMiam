@@ -125,6 +125,15 @@ class NutritionToolTests(unittest.TestCase):
             with self.assertRaises(PlanError):self.plan.parse('pizza',[])
             execute.assert_not_called()
 
+    def test_shared_plan_limit_has_explicit_recoverable_error(self):
+        response=MagicMock(status_code=200)
+        response.__enter__.return_value=response
+        response.iter_lines.return_value=[('data: '+json.dumps({'type':'error','error':{
+            'code':'subscription_sharing_usage_limit_exceeded'}})).encode()]
+        with patch('mymiam.openai_plan.requests.post',return_value=response):
+            with self.assertRaisesRegex(PlanError,'Limite d’usage ChatGPT'):
+                self.plan.parse('Pizza',[])
+
     def test_tool_loop_has_bounded_number_of_responses(self):
         sent=[]
         def repeated(*args,**kwargs):
@@ -141,3 +150,73 @@ class NutritionToolTests(unittest.TestCase):
             self.plan.parse('pizza',[])
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM meals').fetchone()[0],0)
+
+    def test_live_workflow_research_save_then_reuse_without_web(self):
+        query='Prosciutto e Funghi Tripletta Bordeaux'
+        evidence={'found':True,'exact_match':True,'kind':'restaurant',
+            'name':'Prosciutto e Funghi','canonical_query':query,
+            'source_url':'https://example.org/menu','ingredients':['fromage'],
+            'barcode':None,'note':'Carte vérifiée'}
+        # One local lookup, bounded external research, component lookup, save,
+        # then final selection. No meals are created by this catalogue workflow.
+        responses=[self.stream([self.call(args={'queries':[query]})]),
+            self.stream([self.call('research_food',{'query':query})]),
+            self.stream([{'type':'web_search_call','action':{'sources':[{'url':evidence['source_url']}]}}],text=evidence),
+            self.stream([self.call(args={'queries':['pizza']})]),
+            self.stream([self.call('save_recipe',{'query':query,'components':[{'food_id':'cheese','grams':450}], 'note':'Estimation'})])]
+        sent=[]
+        def post(*args,**kwargs):
+            sent.append(json.loads(json.dumps(kwargs['json'])))
+            if responses:return responses.pop(0)
+            with self.store.connect() as db:
+                food_id=db.execute('SELECT food_id FROM food_references').fetchone()[0]
+            return self.stream(text=self.draft(food_id))
+        with patch('mymiam.openai_plan.requests.post',side_effect=post):
+            first=self.plan.parse('Pizza chez Tripletta Bordeaux',[])
+        self.assertEqual(len(sent),6)
+        self.assertEqual(sent[2]['tools'][0]['type'],'web_search')
+        self.assertNotIn('Pizza chez',sent[2]['input'][0]['content'])
+        responses.extend([self.stream([self.call(args={'queries':['pizza entière Prosciutto e Funghi chez Tripletta Bordeaux']})]),
+                          self.stream(text=self.draft(first['items'][0]['food_id']))])
+        sent.clear()
+        with patch('mymiam.openai_plan.requests.post',side_effect=post):
+            second=self.plan.parse('Deux pizzas chez Tripletta Bordeaux',[])
+        self.assertEqual(first['items'][0]['food_id'],second['items'][0]['food_id'])
+        self.assertEqual(len(sent),2)
+        usage=json.loads((self.store.directory/'last_usage.json').read_text())
+        self.assertEqual(usage['tools'],['search_foods'])
+
+    def test_external_failure_keeps_explicit_generic_estimate(self):
+        query='Regina Tripletta Bordeaux'
+        responses=[self.stream([self.call(args={'queries':[query]})]),
+                   self.stream([self.call('research_food',{'query':query})])]
+        # The separate web request fails; the original workflow can still finish.
+        def post(*args,**kwargs):
+            if kwargs['json']['tools'][0]['type']=='web_search':
+                raise PlanError('Outil web indisponible')
+            if responses:return responses.pop(0)
+            return self.stream(text=self.draft(None))
+        with patch('mymiam.openai_plan.requests.post',side_effect=post):
+            result=self.plan.parse('Une Regina chez Tripletta Bordeaux',[])
+        self.assertIsNone(result['items'][0]['food_id'])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM food_references').fetchone()[0],0)
+
+    def test_final_answer_cannot_skip_verification_of_named_brand(self):
+        query={'label':'pizza','brand':'Auchan','restaurant':None,'city':None}
+        responses=[self.stream([self.call(args={'queries':[query]})]),
+                   self.stream(text=self.draft(None)),
+                   self.stream([self.call('research_food',{'query':'pizza Auchan'})]),
+                   self.stream([{'type':'web_search_call','action':{'sources':[]}}],
+                               text={'found':False,'exact_match':False,'note':'Pas de source sûre'}),
+                   self.stream(text=self.draft(None))]
+        sent=[]
+        def post(*args,**kwargs):
+            sent.append(json.loads(json.dumps(kwargs['json'])))
+            return responses.pop(0)
+        with patch('mymiam.openai_plan.requests.post',side_effect=post):
+            result=self.plan.parse('Une pizza Auchan',[])
+        self.assertIsNone(result['items'][0]['food_id'])
+        self.assertEqual(len(sent),5)
+        self.assertEqual(sent[2]['tool_choice'],'required')
+        self.assertTrue(any(item.get('role')=='developer' for item in sent[2]['input']))

@@ -46,6 +46,10 @@ class Store:
                     request_id TEXT NOT NULL, signature TEXT NOT NULL, UNIQUE(user_id, request_id));
                 CREATE TABLE IF NOT EXISTS meal_insights (
                     meal_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS food_references (
+                    food_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS food_aliases (
+                    alias TEXT PRIMARY KEY, food_id TEXT NOT NULL);
             """)
         os.chmod(self.path, 0o600)
 

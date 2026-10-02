@@ -223,3 +223,34 @@ donnée personnelle ; les connexions réelles restent à valider par le proprié
 Code sous MIT. Barlow Condensed sous SIL Open Font License, dans
 `static/assets/fonts/OFL.txt`. Le code public n'inclut ni repas, ni profils,
 ni sessions, ni jetons OpenAI/Garmin, ni mots de passe.
+
+## Catalogue personnel et recherches de Luna
+
+Les skills de saisie sont chargés par MyMiam à chaque analyse depuis `skills/`.
+Luna cherche d'abord dans le catalogue interne avec le nom du plat et sa marque,
+ou son restaurant et sa ville. Une référence personnelle reconnue est réutilisée,
+y compris sa masse estimée par portion ; deux unités multiplient cette portion.
+L'ajout d'un repas n'exige aucune recherche externe quand la fiche est connue.
+
+Sans correspondance sûre pour un produit de marque ou de restaurant,
+`nutrition.research_food` fait vérifier la référence sur le web par Luna via la
+même connexion au forfait ChatGPT. Aucun service de recherche payant séparé,
+aucune clé API et aucun repli facturé ne sont configurés. Ces recherches utilisent
+le quota du forfait et dépendent de la disponibilité des sources et de l'outil web.
+Deux références externes au maximum sont recherchées par saisie. Les identités
+absentes, noms différents et échecs restent signalés dans l'approximation retenue.
+
+Un produit vérifié avec code-barres est importé depuis l'API publique Open Food
+Facts : le serveur lit les nutriments par 100 g, conserve les bornes/traces comme
+inconnues et refuse un produit dont l'identité ne correspond pas. La même fonction
+sert à la recherche manuelle par code-barres, dont les références sont mémorisées.
+
+Une recette de restaurant vérifiée peut être mémorisée par `nutrition.save_recipe` :
+Luna sélectionne les ingrédients du catalogue et estime leurs masses comestibles
+pour une portion. Le serveur calcule la composition à partir de ces ingrédients.
+La fiche conserve les ingrédients publiés, les composants Ciqual choisis, le lien
+vers la carte, la date de recherche et les hypothèses. Poids et calories restent
+**estimés**, même lorsque le nom et les ingrédients sont vérifiés. Le journal
+montre le lien source et distingue l'estimation de composition de celle du poids.
+Un nom proche ne crée pas un alias exact ; marques, villes et recettes sont conservées.
+La base personnelle et ses fiches restent dans `instance/`, hors du dépôt public.

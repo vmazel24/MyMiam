@@ -43,6 +43,8 @@ def search_foods(store, query, limit=12):
     words = [w for w in query.split() if w not in STOP]
     if "poulet" in words and "blanc" in words:
         words = ["filet" if w == "blanc" else w for w in words]
+    if "jambon" in words and "blanc" in words:
+        words = ["cuit" if w == "blanc" else w for w in words]
     if not words:
         return []
     with store.connect() as db:
@@ -85,8 +87,12 @@ def resolve_items(store, inputs):
                 raise ValueError("Choisis un aliment du catalogue pour chaque ligne")
             grams = finite_number(item.get("grams"), 0.1, 10000, "Quantité en grammes")
             food = food_record(row)
+            reference_row = db.execute('SELECT data FROM food_references WHERE food_id=?', (food['id'],)).fetchone()
+            reference = json.loads(reference_row[0]) if reference_row else None
             result.append({"food_id": food["id"], "name": food["name"], "source": food["source"],
                            "grams": grams, "estimated": bool(item.get("estimated", False)),
+                           "source_url": reference.get('source_url') if reference else None,
+                           "composition_estimated": bool(reference and reference.get('composition_estimated')),
                            "note": str(item.get("note", ""))[:300], "flags": food["flags"],
                            "nutrients": {k: None if food["nutrients"].get(k) is None else
                                          round(food["nutrients"][k] * grams / 100, 3) for k in NUTRIENTS}})
