@@ -330,6 +330,11 @@ function renderDashboard() {
       : s.expenditure == null
         ? "Complète ton profil pour calculer tes repères."
         : `${s.expenditure_source}${s.projected ? " · bilan provisoire" : ""}.${s.resting == null ? "" : ` Repos estimé : ${fmt(s.resting)} kcal.`}`;
+  if (s.target_breakdown && goal != null) {
+    const b = s.target_breakdown;
+    $("expenditure-note").textContent =
+      `${b.base_source} : ${fmt(b.base)} + ${fmt(b.active)} kcal actives − ${fmt(b.deficit)} kcal de déficit cible = ${fmt(goal)} kcal d’objectif.${s.projected ? " Objectif provisoire, actualisé à chaque synchronisation Garmin." : ""}`;
+  }
   $("macro-cards").innerHTML = Object.entries(macroNames)
     .map(([key, name]) => {
       const value = logged ? s.intake[key] : null,
@@ -343,7 +348,7 @@ function renderDashboard() {
     })
     .join("");
   $("garmin-day").innerHTML = ga?.has_data
-    ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total ${ga.partial ? "observé jusqu’ici" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Calories actives, déjà incluses</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Repos ${ga.partial ? "accumulé" : "Garmin"}</span></div></div><p class="muted footnote">${ga.partial ? "Données provisoires : l’objectif sur 24 h vient de ton profil." : "Le total Garmin prend le relais de l’estimation du profil."} Synchronisation automatique chaque heure. Dernière mise à jour : ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
+    ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total ${ga.partial ? "observé jusqu’ici" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Calories actives, déjà incluses</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Repos ${ga.partial ? "accumulé" : "Garmin"}</span></div></div><p class="muted footnote">${ga.partial ? (s.target_breakdown ? "Données provisoires : l’objectif associe le repos estimé sur 24 h aux calories actives Garmin du jour." : "Données provisoires : complète ton profil et synchronise tes calories actives pour ajuster l’objectif.") : "Le total Garmin prend le relais de l’estimation du profil."} Synchronisation automatique chaque heure. Dernière mise à jour : ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
     : `<p class="muted">Aucune donnée Garmin pour cette journée. ${state.integrations?.garmin?.connected ? "Tu peux lancer une synchronisation depuis ton profil." : "Connecte Garmin depuis ton profil pour suivre ta dépense."}</p>`;
   if (ga?.activities?.length)
     $("garmin-day").innerHTML +=

@@ -192,8 +192,14 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
   glucides 40–55 %, lipides 35–40 % de l'apport énergétique total), et ne constitue
   pas une prescription individualisée. [Référence Anses, tableau 4](https://www.anses.fr/sites/default/files/NUT2012SA0103Ra-1.pdf).
 - Pour les jours passés renseignés par Garmin, le **total quotidien remplace**
-  l'estimation du profil ; ne pas ajouter les activités à nouveau. Aujourd'hui,
-  le total Garmin est accumulé et affiché séparément de la projection sur 24 h.
+  l'estimation du profil ; les calories actives sont déjà incluses. Aujourd'hui,
+  l'objectif vaut **repos estimé sur 24 h + calories actives Garmin du jour −
+  déficit cible**. Le facteur d'activité est remplacé par les calories actives
+  remontées, pour les compter une seule fois. Le total Garmin accumulé reste
+  affiché séparément de cette projection sur 24 h. Sans calories actives
+  disponibles, l'estimation habituelle du profil reste le repli. Le détail du
+  calcul est affiché sous le compteur, et chaque synchronisation actualise
+  l'objectif, les macros, la jauge et le bilan provisoire.
 - Le déficit est signé (`dépense − apports`) ; les surplus réduisent le cumul.
   Le cumul porte automatiquement sur les jours passés avec au moins un repas
   et une énergie calculable. Aucune confirmation de journée n'est nécessaire.

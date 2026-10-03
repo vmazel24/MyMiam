@@ -233,14 +233,53 @@ class CoreTests(unittest.TestCase):
         day=summary(self.store,self.user['id'],self.day)
         self.assertEqual(day['expenditure'],2600)
         self.assertNotEqual(day['expenditure'],3450)
+        self.assertEqual(day['targets']['kcal'], 2350)
+        self.assertEqual(day['target_breakdown']['active'], 850)
 
-    def test_partial_garmin_does_not_replace_full_day_projection(self):
+    def test_partial_garmin_adds_active_to_full_day_rest_once(self):
         day=date.today().isoformat()
         raw=normalize_stats({'totalKilocalories':500,'activeKilocalories':50,'bmrKilocalories':450},day)
         with self.store.connect() as db:db.execute('INSERT INTO garmin_days VALUES (?,?,?)',(self.user['id'],day,json.dumps(raw)))
         result=summary(self.store,self.user['id'],day)
         self.assertTrue(result['garmin']['partial'])
-        self.assertEqual(result['expenditure'],round(result['resting']*1.4))
+        self.assertEqual(result['expenditure'], result['resting'] + 50)
+        self.assertEqual(result['targets']['kcal'], result['resting'] + 50 - 250)
+        self.assertNotEqual(result['expenditure'], 500)
+        self.assertNotEqual(result['expenditure'], round(result['resting'] * 1.4) + 50)
+        self.assertEqual(result['target_breakdown']['base'], result['resting'])
+
+    def test_todays_target_and_macros_follow_active_calories_without_affecting_cumulative(self):
+        day = date.today().isoformat()
+        self.meal(day=day)
+        for active in (0, 600, 850):
+            raw = normalize_stats({'totalKilocalories': 450 + active, 'activeKilocalories': active,
+                                   'bmrKilocalories': 450}, day)
+            raw['activities'] = [{'name': 'Séance', 'calories': 4000}]
+            with self.store.connect() as db:
+                db.execute('INSERT OR REPLACE INTO garmin_days VALUES (?,?,?)', (self.user['id'], day, json.dumps(raw)))
+            result = self.client.get('/api/dashboard?day=' + day).json
+            goal = result['resting'] + active - 250
+            self.assertEqual(result['targets']['kcal'], goal)
+            self.assertEqual(result['targets']['protein'], round(goal * .20 / 4))
+            self.assertEqual(result['targets']['carbs'], round(goal * .45 / 4))
+            self.assertEqual(result['targets']['fat'], round(goal * .35 / 9))
+            self.assertEqual(result['deficit'], result['resting'] + active - 260)
+            self.assertEqual(trends(self.store, self.user['id'], day)['covered_days'], 0)
+
+    def test_partial_garmin_without_active_calories_keeps_profile_fallback(self):
+        day = date.today().isoformat()
+        raw = normalize_stats({'totalKilocalories': 500, 'bmrKilocalories': 500}, day)
+        with self.store.connect() as db:
+            db.execute('INSERT INTO garmin_days VALUES (?,?,?)', (self.user['id'], day, json.dumps(raw)))
+        result = summary(self.store, self.user['id'], day)
+        self.assertEqual(result['expenditure'], round(result['resting'] * 1.4))
+        self.assertIsNone(result['target_breakdown'])
+        with self.store.connect() as db:
+            db.execute('DELETE FROM profiles WHERE user_id=?', (self.user['id'],))
+        result = summary(self.store, self.user['id'], day)
+        self.assertIsNone(result['targets'])
+        self.assertIsNone(result['expenditure'])
+        self.assertIsNone(result['deficit'])
 
     def test_today_excluded_from_cumulative_automatically(self):
         self.meal(day=date.today().isoformat())

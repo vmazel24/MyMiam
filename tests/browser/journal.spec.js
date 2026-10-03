@@ -1134,3 +1134,85 @@ test("fat equivalents are the default across balances charts and trends and the 
     fullPage: true,
   });
 });
+
+test("active Garmin calories update the goal ratio gauge and overshoot after refresh", async ({
+  page,
+}, info) => {
+  let active = 100;
+  await page.route("**/api/dashboard?**", (route) => {
+    const expenditure = 2300 + active,
+      goal = expenditure - 200;
+    return route.fulfill({
+      json: {
+        day: new URL(route.request().url()).searchParams.get("day"),
+        meals: [],
+        has_meals: true,
+        complete: true,
+        intake: { kcal: 2300, protein: 100, carbs: 250, fat: 90 },
+        targets: {
+          kcal: goal,
+          protein: Math.round(goal / 20),
+          carbs: Math.round((goal * 0.45) / 4),
+          fat: Math.round((goal * 0.35) / 9),
+        },
+        expenditure,
+        expenditure_source: "Repos estimé sur 24 h + calories actives Garmin",
+        resting: 2300,
+        deficit: expenditure - 2300,
+        projected: true,
+        target_breakdown: {
+          base: 2300,
+          active,
+          deficit: 200,
+          base_source: "Repos estimé sur 24 h",
+        },
+        garmin: {
+          has_data: true,
+          partial: true,
+          active,
+          resting: 450,
+          total: 450 + active,
+          synced_at: new Date().toISOString(),
+          activities: [],
+        },
+      },
+    });
+  });
+  await page.reload();
+  await expect(page.locator("#intake-kcal")).toHaveText(
+    /2\s300\s*\/ 2\s200kcal/,
+  );
+  await expect(page.locator("#energy-caption")).toHaveText(
+    "100 kcal au-dessus de ton objectif.",
+  );
+  await expect(page.locator(".energy-card")).toHaveClass(/is-over-goal/);
+  active = 600;
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange")),
+  );
+  await expect(page.locator("#intake-kcal")).toHaveText(
+    /2\s300\s*\/ 2\s700kcal/,
+  );
+  await expect(page.locator("#target-value")).toHaveText(/2\s700 kcal/);
+  await expect(page.locator("#energy-pct")).toHaveText("85%");
+  await expect(page.locator("#energy-caption")).toHaveText(
+    "400 kcal jusqu’à ton objectif.",
+  );
+  await expect(page.locator(".energy-card")).not.toHaveClass(/is-over-goal/);
+  await expect(page.locator("#expenditure-value")).toHaveText(/1\s050 kcal/);
+  await expect(page.locator("#expenditure-note")).toContainText(
+    /2\s300 \+ 600 kcal actives − 200/,
+  );
+  await expect(page.locator("#macro-cards .protein .macro-target")).toHaveText(
+    "Objectif 135 g",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 1,
+    ),
+  ).toBe(false);
+  await page.screenshot({
+    path: info.outputPath("active-calorie-target.png"),
+    fullPage: true,
+  });
+});
