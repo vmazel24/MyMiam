@@ -212,9 +212,11 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
 - Le Dashboard affiche le bilan énergétique journalier et son cumul sur 7, 30 ou 90 jours.
   Les montants sont affichés sans signe, accompagnés d'un tag « En déficit »,
   « En surplus » ou « À l'équilibre », dans les cartes et le tableau.
-  Le calcul conserve son signe en interne : les déficits montent en vert et
-  les surplus descendent en rouge sur les graphiques, dont les axes et
-  infobulles indiquent des montants sans signe.
+  En kcal, les déficits montent en vert et les surplus descendent en rouge.
+  En kg équivalents de gras, les graphiques représentent une variation :
+  perte équivalente négative vers le bas en vert, gain équivalent positif
+  vers le haut en rouge. Les axes et infobulles en kg indiquent ce signe,
+  sans transformer cette estimation énergétique en perte de gras mesurée.
   Les journées manquantes interrompent les graphiques ; aujourd'hui est exclu
   des bilans définitifs. Sans repas saisi, les
   apports restent affichés inconnus. Le total Garmin observé est présenté

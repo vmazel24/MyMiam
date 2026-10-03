@@ -125,9 +125,12 @@
             <summary>Comment est-ce calculé ?</summary>
             <p>
               Le bilan compare tes apports à ta dépense : moins mangé que
-              dépensé = en déficit ; plus mangé = en surplus. Le montant est
-              affiché sans signe, avec le tag correspondant. L’objectif
-              d’apports inclut le déficit cible choisi dans ton profil.
+              dépensé = en déficit ; plus mangé = en surplus. Les cartes et le
+              tableau affichent le montant sans signe, avec le tag
+              correspondant. Sur les graphiques en kg équivalents de gras, une
+              perte équivalente est négative et descend en vert ; un gain
+              équivalent est positif et monte en rouge. L’objectif d’apports
+              inclut le déficit cible choisi dans ton profil.
             </p>
             <p>
               Équivalent énergétique estimé : 1 kg de masse grasse ≈ 9 440 kcal
@@ -251,24 +254,28 @@
           <div class="dashboard-charts">
             <article class="panel">
               <div class="section-head">
-                <h3>Bilan par jour</h3>
+                <h3 data-balance-chart="daily">
+                  Variation équivalente par jour
+                </h3>
                 <span class="pill" data-balance-unit>kg équiv. gras</span>
               </div>
               <div id="daily-deficit-chart" class="chart"></div>
               <div class="legend deficit-legend">
-                <span class="deficit-dot"></span> En déficit ↑
-                <span class="surplus-dot"></span> En surplus ↓
+                <span class="deficit-dot"></span> Perte équiv. ↓
+                <span class="surplus-dot"></span> Gain équiv. ↑
               </div>
             </article>
             <article class="panel">
               <div class="section-head">
-                <h3>Bilan cumulé</h3>
+                <h3 data-balance-chart="cumulative">
+                  Variation équivalente cumulée
+                </h3>
                 <span class="pill" data-balance-unit>kg équiv. gras</span>
               </div>
               <div id="cumulative-deficit-chart" class="chart"></div>
               <div class="legend deficit-legend">
-                <span class="deficit-dot"></span> En déficit ↑
-                <span class="surplus-dot"></span> En surplus ↓
+                <span class="deficit-dot"></span> Perte équiv. ↓
+                <span class="surplus-dot"></span> Gain équiv. ↑
               </div>
               <p class="footnote muted">
                 Écart net sur la période, après compensation des déficits et des

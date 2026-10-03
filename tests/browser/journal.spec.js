@@ -968,8 +968,8 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
   const zeroY = Number(
     await page.locator("#daily-deficit-chart .zero-line").getAttribute("y1"),
   );
-  expect(Number(await daily.first().getAttribute("y"))).toBeLessThan(zeroY);
-  expect(Number(await daily.nth(1).getAttribute("y"))).toBe(zeroY);
+  expect(Number(await daily.first().getAttribute("y"))).toBe(zeroY);
+  expect(Number(await daily.nth(1).getAttribute("y"))).toBeLessThan(zeroY);
   await expect(daily.first()).toHaveCSS("fill", "rgb(91, 150, 47)");
   await expect(daily.nth(1)).toHaveCSS("fill", "rgb(193, 91, 77)");
   const cumulative = page.locator("#cumulative-deficit-chart .deficit-point");
@@ -986,6 +986,13 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
     .getByRole("combobox", { name: "Unité des bilans" })
     .selectOption("kcal");
   await expect(page.locator("#dashboard-kpis")).toContainText("200 kcal");
+  const energyZeroY = Number(
+    await page.locator("#daily-deficit-chart .zero-line").getAttribute("y1"),
+  );
+  expect(Number(await daily.first().getAttribute("y"))).toBeLessThan(
+    energyZeroY,
+  );
+  expect(Number(await daily.nth(1).getAttribute("y"))).toBe(energyZeroY);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth + 1,
@@ -1084,13 +1091,13 @@ test("fat equivalents are the default across balances charts and trends and the 
   );
   await expect(
     page.locator("#daily-deficit-chart .deficit-bar title").first(),
-  ).toHaveText(/Bilan : ≈ 0,1 kg · En déficit/);
+  ).toHaveText(/Variation équivalente : ≈ -0,1 kg · En déficit/);
   await expect(page.locator("#daily-deficit-chart .surplus title")).toHaveText(
-    /Bilan : ≈ 0,05 kg · En surplus/,
+    /Variation équivalente : ≈ \+0,05 kg · En surplus/,
   );
   await expect(
     page.locator("#cumulative-deficit-chart .deficit-point title").last(),
-  ).toHaveText(/≈ 0,05 kg/);
+  ).toHaveText(/≈ -0,05 kg/);
   await expect(page.locator("[data-balance-unit]").first()).toHaveText(
     "kg équiv. gras",
   );
@@ -1231,7 +1238,7 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
 
 test("cumulative deficit changes color at zero and keeps gaps in both units", async ({
   page,
-}) => {
+}, info) => {
   const deficits = [300, -600, 400, null, -200, 400];
   const days = deficits.map((deficit, i) => {
     const day = new Date();
@@ -1267,7 +1274,8 @@ test("cumulative deficit changes color at zero and keeps gaps in both units", as
         .split(" ")
         .map((pair) => pair.split(",").map(Number));
       for (const [, y] of coordinates) {
-        if (red) expect(y).toBeGreaterThanOrEqual(zeroY - 0.001);
+        if (red === (name === "kcal"))
+          expect(y).toBeGreaterThanOrEqual(zeroY - 0.001);
         else expect(y).toBeLessThanOrEqual(zeroY + 0.001);
       }
       await expect(line).toHaveCSS(
@@ -1288,6 +1296,21 @@ test("cumulative deficit changes color at zero and keeps gaps in both units", as
         .map((pair) => Number(pair.split(",")[0]));
       expect(Math.min(...xs) < gapX && Math.max(...xs) > gapX).toBe(false);
     }
+    await expect(page.locator(".deficit-legend").first()).toContainText(
+      name === "fat" ? "Perte équiv. ↓" : "En déficit ↑",
+    );
+    if (name === "fat") {
+      await expect(chart.locator(".balance-axis-deficit").last()).toHaveText(
+        /^-/,
+      );
+      await expect(chart.locator(".balance-axis-surplus").first()).toHaveText(
+        /^\+/,
+      );
+    }
+    await page.screenshot({
+      path: info.outputPath(`balance-chart-${name}.png`),
+      fullPage: true,
+    });
   }
 });
 

@@ -79,6 +79,11 @@ function balanceTag(kcal, provisional = false) {
   const kind = kcal > 0 ? "deficit" : kcal < 0 ? "surplus" : "even";
   return `<span class="balance-tag balance-${kind}">${balanceStatus(kcal)}${provisional ? " · provisoire" : ""}</span>`;
 }
+function chartBalanceValue(kcal) {
+  if (state.balanceUnit !== "fat") return balanceValue(kcal);
+  const change = kcal === 0 ? 0 : -kcal;
+  return `≈ ${change > 0 ? "+" : ""}${balanceNumber(change)} kg`;
+}
 function syncBalanceUnit() {
   $("balance-unit").value = state.balanceUnit;
   $("balance-controls").hidden = !["today", "trends"].includes(state.view);
@@ -86,6 +91,19 @@ function syncBalanceUnit() {
   $("trend-balance-heading").textContent = `Bilan · ${balanceUnitLabel()}`;
   document.querySelectorAll("[data-balance-unit]").forEach((el) => {
     el.textContent = balanceUnitLabel();
+  });
+  document.querySelectorAll(".deficit-legend").forEach((el) => {
+    el.innerHTML =
+      state.balanceUnit === "fat"
+        ? '<span class="deficit-dot"></span> Perte équiv. ↓ <span class="surplus-dot"></span> Gain équiv. ↑'
+        : '<span class="deficit-dot"></span> En déficit ↑ <span class="surplus-dot"></span> En surplus ↓';
+  });
+  document.querySelectorAll("[data-balance-chart]").forEach((el) => {
+    const cumulative = el.dataset.balanceChart === "cumulative";
+    el.textContent =
+      state.balanceUnit === "fat"
+        ? `Variation équivalente ${cumulative ? "cumulée" : "par jour"}`
+        : `Bilan ${cumulative ? "cumulé" : "par jour"}`;
   });
 }
 async function api(path, options = {}) {
@@ -932,13 +950,16 @@ function renderDashboardHistory() {
   $("cumulative-deficit-chart").innerHTML = deficitChart(data.days, true);
 }
 function deficitChart(days, cumulative) {
+  const fat = state.balanceUnit === "fat",
+    direction = fat ? -1 : 1;
   let running = 0;
   const values = days.map((d) => {
     if (d.day >= today() || d.deficit == null) return null;
     running += d.deficit;
     return cumulative ? running : d.deficit;
   });
-  const known = values.filter((v) => v != null);
+  // Keep energy signs for deficit/surplus colors; project fat loss downwards.
+  const known = values.filter((v) => v != null).map((v) => direction * v);
   if (!known.length)
     return '<div class="empty-state chart-empty"><p>Ton premier bilan apparaîtra après une journée passée avec des repas saisis.</p></div>';
   const width = 500,
@@ -955,13 +976,17 @@ function deficitChart(days, cumulative) {
     high = 100;
     low = -100;
   }
-  const y = (v) => top + ((high - v) / (high - low)) * plotHeight;
+  const y = (v) => top + ((high - direction * v) / (high - low)) * plotHeight;
   const step = plotWidth / days.length,
     x = (i) => left + (i + 0.5) * step;
-  let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${cumulative ? "Bilan énergétique cumulé" : "Bilan énergétique par jour"} · ${balanceUnitLabel()} · déficit vers le haut, surplus vers le bas">`;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${fat ? "Variation équivalente de masse grasse" : "Bilan énergétique"} ${cumulative ? (fat ? "cumulée" : "cumulé") : "par jour"} · ${balanceUnitLabel()} · ${fat ? "perte vers le bas, gain vers le haut" : "déficit vers le haut, surplus vers le bas"}">`;
   for (let i = 0; i < 3; i++) {
     const value = high - ((high - low) * i) / 2;
-    svg += `<line class="grid-line" x1="${left}" x2="${width - right}" y1="${y(value)}" y2="${y(value)}"/><text class="balance-axis-${value > 0 ? "deficit" : value < 0 ? "surplus" : "even"}" aria-label="${balanceStatus(value)} : ${balanceNumber(Math.abs(value))}" x="0" y="${y(value) + 4}">${balanceNumber(Math.abs(value))}</text>`;
+    const energy = direction * value;
+    const label = fat
+      ? `${value > 0 ? "+" : ""}${balanceNumber(value === 0 ? 0 : value)}`
+      : balanceNumber(Math.abs(value));
+    svg += `<line class="grid-line" x1="${left}" x2="${width - right}" y1="${y(energy)}" y2="${y(energy)}"/><text class="balance-axis-${energy > 0 ? "deficit" : energy < 0 ? "surplus" : "even"}" aria-label="${balanceStatus(energy)} : ${label}" x="0" y="${y(energy) + 4}">${label}</text>`;
   }
   svg += `<line class="zero-line" x1="${left}" x2="${width - right}" y1="${y(0)}" y2="${y(0)}"/>`;
   let segment = [];
@@ -1007,7 +1032,7 @@ function deficitChart(days, cumulative) {
       flush();
       return;
     }
-    const title = `${days[i].day} · ${cumulative ? "Bilan cumulé" : "Bilan"} : ${balanceValue(value)} · ${balanceStatus(value)}`;
+    const title = `${days[i].day} · ${fat ? "Variation équivalente" : "Bilan"}${cumulative ? (fat ? " cumulée" : " cumulé") : ""} : ${chartBalanceValue(value)} · ${balanceStatus(value)}`;
     if (cumulative) {
       segment.push({ x: x(i), value });
       svg += `<circle class="deficit-point ${value < 0 ? "surplus" : ""}" data-day="${days[i].day}" data-value="${value}" cx="${x(i)}" cy="${y(value)}" r="3.5"><title>${escapeHTML(title)}</title></circle>`;
