@@ -121,6 +121,48 @@ class CoreTests(unittest.TestCase):
         self.meal(items=[{"food_id":"ciqual:rice","grams":200,"nutrients":{"kcal":1}}])
         self.assertEqual(summary(self.store,self.user['id'],self.day)['intake']['kcal'],260)
 
+    def test_partial_subtotals_display_known_foods_but_never_enter_deficit_statistics(self):
+        with self.store.connect() as db:
+            db.execute("UPDATE foods SET nutrients=? WHERE id='ciqual:chicken'",
+                (json.dumps({'kcal':None, 'protein':None, 'carbs':None, 'fat':None, 'fiber':None}),))
+        meal_id = self.meal(items=[{'food_id':'ciqual:rice','grams':200},
+                                  {'food_id':'ciqual:chicken','grams':100}]).json['id']
+        with self.store.connect() as db:
+            original = db.execute('SELECT items FROM meals WHERE id=?', (meal_id,)).fetchone()[0]
+        day = summary(self.store, self.user['id'], self.day)
+        self.assertEqual(day['nutrition_coverage']['kcal'], {'known':260, 'known_items':1, 'missing_items':1})
+        self.assertEqual(day['meals'][0]['nutrition_coverage'], day['nutrition_coverage'])
+        self.assertIsNone(day['intake']['kcal'])
+        self.assertIsNone(day['deficit'])
+        self.assertEqual(trends(self.store,self.user['id'],self.day)['covered_days'],0)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT items FROM meals WHERE id=?', (meal_id,)).fetchone()[0], original)
+
+    def test_catalogue_relaxation_retains_defining_ingredients_and_meat_identity(self):
+        from mymiam.catalogue import matches_for
+        with self.store.connect() as db:
+            for food_id, name in [('pasta-salad', 'Salade de pâtes avec sauce'),
+                    ('other-salad', 'Salade composée avec viande'),
+                    ('beef', 'Boeuf, steak haché, cuit'),
+                    ('prepared', 'Purée de pomme de terre à la viande hachée'),
+                    ('egg', 'Oeuf cru'), ('white', "Oeuf, blanc (blanc d'oeuf), cru")]:
+                db.execute('INSERT INTO foods VALUES (?,?,?,?,?,?)',
+                    (food_id,name,normalize(name),'Ciqual',json.dumps({'kcal':100}), '{}'))
+        self.assertEqual([f['id'] for f in matches_for(self.store, 'salade composée de pâtes')], ['pasta-salad'])
+        self.assertEqual([f['id'] for f in matches_for(self.store, 'viande hachée de boeuf cuite')], ['beef'])
+        self.assertEqual([f['id'] for f in search_foods(self.store, 'œuf entier cru')], ['egg'])
+
+    def test_drinks_default_to_ready_to_drink_and_meat_queries_prefer_meat_over_offal(self):
+        with self.store.connect() as db:
+            for food_id, name in [('coffee-ground','Café, moulu'), ('coffee-powder','Café, poudre soluble'),
+                    ('coffee-drink','Café noir, prêt à boire'), ('offal','Foie, poulet, cuit')]:
+                db.execute('INSERT INTO foods VALUES (?,?,?,?,?,?)',
+                    (food_id,name,normalize(name),'Ciqual',json.dumps({'kcal':100}), '{}'))
+        self.assertEqual([f['id'] for f in search_foods(self.store, 'café')], ['coffee-drink'])
+        self.assertEqual([f['id'] for f in search_foods(self.store, 'café noir')], ['coffee-drink'])
+        self.assertEqual([f['id'] for f in search_foods(self.store, 'café moulu')], ['coffee-ground'])
+        self.assertEqual(search_foods(self.store, 'poulet cuit')[0]['id'], 'ciqual:chicken')
+
     def test_invalid_quantities_unknown_foods_rejected(self):
         for grams in (0,-1,10001,'NaN','Infinity',True):
             self.assertEqual(self.meal(items=[{"food_id":"ciqual:rice","grams":grams}]).status_code,400)

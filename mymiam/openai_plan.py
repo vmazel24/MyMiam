@@ -192,7 +192,7 @@ class ChatGPTPlan:
                             "item_index": {"type": "integer"}, "label": {"type": "string"}, "selected": {"type": "integer"},
                             "options": {"type": "array", "items": option}}}}}}
         instructions = (meal_instructions() + "\nContexte du repas : " +
-            json.dumps(context or {}, ensure_ascii=False) +
+            json.dumps({k: v for k, v in (context or {}).items() if k != 'capture_id'}, ensure_ascii=False) +
             "\nRecettes habituelles de cet utilisateur : " + json.dumps(favorites, ensure_ascii=False))
         payload = {"model": model, "instructions": instructions,
                    "input": [{"role": "user", "content": text}], "reasoning": {"effort": "low"},
@@ -214,24 +214,38 @@ class ChatGPTPlan:
         payload['tool_choice'] = 'required'
         payload['include'] = ['reasoning.encrypted_content']
         calls = 0
+        repair_requested = False
+        repair_rounds = tool_errors = last_repair_errors = 0
+        audit_id = str((context or {}).get('capture_id') or uuid.uuid4())
+        # Only generated capture UUIDs may select a filename.
+        audit_id = str(uuid.UUID(audit_id))
+        trace_path = self.directory / 'analysis_traces' / (audit_id + '.json')
+        def trace(status, **details):
+            protected_write(trace_path, {'model': model, 'at': time.time(), 'status': status,
+                'tools': nutrition.audit, 'usage': usage, **details})
+        traces = sorted(trace_path.parent.glob('*.json'), key=lambda p: p.stat().st_mtime) if trace_path.parent.exists() else []
+        for old in traces[:-99]:
+            old.unlink(missing_ok=True)
         started = time.monotonic()
         with self.locked():
             token = self.access_token()
             # Simple captures keep the short loop. Public recipe research may need
             # ingredient lookup and persistence, so gets three additional turns.
-            for turn in range(7):
+            for turn in range(10):
                 if time.monotonic() - started > 240:
                     raise PlanError("L'analyse a pris trop de temps. Ton envoi est conservé.")
-                final_turn = 6 if nutrition.external_count else 3
+                final_turn = (9 if repair_rounds > 1 else
+                              6 if nutrition.external_count or nutrition.estimated_count or repair_requested else 3)
                 if turn >= final_turn:
                     payload['tool_choice'] = 'none'
+                trace('analysing', response_count=turn + research_responses)
                 body, output, text = self.response(payload, token)
                 for key, value in body.get('usage', {}).items():
                     if isinstance(value, (int, float)) and not isinstance(value, bool):
                         usage[key] = usage.get(key, 0) + value
                 tool_calls = [item for item in output if item.get('type') == 'function_call']
                 if tool_calls:
-                    if payload['tool_choice'] == 'none' or turn >= final_turn or calls + len(tool_calls) > 12:
+                    if payload['tool_choice'] == 'none' or turn >= final_turn or calls + len(tool_calls) > (16 if repair_rounds > 1 else 12):
                         raise PlanError("Luna a dépassé la limite de recherches. Ton envoi est conservé.")
                     # Stateless HTTP: replay completed calls and encrypted reasoning,
                     # then attach client-executed results; no previous_response_id.
@@ -243,11 +257,13 @@ class ChatGPTPlan:
                             result = nutrition.execute(call.get('name', ''), json.loads(call.get('arguments', '{}')),
                                                        call.get('namespace'))
                         except (ValueError, TypeError) as error:
+                            tool_errors += 1
                             result = {'error': str(error)[:250]}
                         all_references = all_references and bool(result.get('results')) and all(
                             value.get('reference_match') for value in result.get('results', []))
                         payload['input'].append({'type': 'function_call_output', 'call_id': call['call_id'],
                                                  'output': json.dumps(result, ensure_ascii=False)})
+                    trace('analysing', response_count=turn + 1 + research_responses)
                     payload['tool_choice'] = 'none' if all_references else 'auto'
                     continue
                 pending = nutrition.pending_research()
@@ -265,6 +281,35 @@ class ChatGPTPlan:
                     nutrition.validate_selection(draft)
                 except (ValueError, TypeError, AttributeError):
                     raise PlanError("Luna n'a pas fourni une fiche vérifiée dans le catalogue. Ton envoi est conservé.")
+                missing = nutrition.selection_issues(draft)
+                can_repair = not repair_requested or (repair_rounds < 2 and tool_errors > last_repair_errors)
+                if missing and nutrition.searched and can_repair and turn < 9:
+                    repair_requested = True
+                    repair_rounds += 1
+                    last_repair_errors = tool_errors
+                    trace('repairing', missing=missing)
+                    payload['input'].extend(output)
+                    payload['input'].append({'role': 'developer', 'content':
+                        'Contrôle nutritionnel : ces aliments ont des valeurs absentes ou une préparation incompatible : '
+                        + json.dumps(missing, ensure_ascii=False) +
+                        '. Conserver tous les aliments et créneaux. Pour un aliment identifiable, chercher '
+                        'un synonyme ou un comparable cohérent ; sinon rechercher ses ingrédients puis utiliser '
+                        'nutrition.estimate_recipe pour une composition estimée, avec poids final et hypothèses. '
+                        'Ne pas inventer de chiffres ni poser de questions. Une vraie composition impossible à '
+                        'identifier peut rester null avec la raison dans note. Fournir ensuite la fiche complète.'})
+                    payload['tool_choice'] = 'auto'
+                    continue
+                # A rejected preparation must not retain plausible-looking
+                # numbers for another cooking state after the bounded repair.
+                for issue in missing:
+                    if issue.get('kind') == 'preparation':
+                        item = draft['items'][issue['item_index']]
+                        item['food_id'] = None
+                        item['note'] = 'Estimation de la cuisson à compléter ; les valeurs du produit cru ne sont pas utilisées.'
+                        draft['clarifications'] = [group for group in draft.get('clarifications', [])
+                            if group.get('item_index') != issue['item_index']]
+                trace('partial' if missing else 'done', missing=missing, draft=draft,
+                      response_count=turn + 1 + research_responses, repair_requested=repair_requested)
                 protected_write(self.directory / 'last_usage.json', {
                     'model': model, 'at': time.time(), 'usage': usage,
                     'tool_calls': calls, 'tools': nutrition.calls,

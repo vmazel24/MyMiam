@@ -6,7 +6,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mymiam.storage import Store
-from mymiam.nutrition import normalize
+from mymiam.nutrition import normalize, resolve_items
+from mymiam.references import lookup_reference
 from mymiam.nutrition_tools import NutritionTools
 from mymiam.openai_plan import ChatGPTPlan, PlanError, protected_write
 from mymiam.captures import prepare_draft
@@ -150,6 +151,184 @@ class NutritionToolTests(unittest.TestCase):
             self.plan.parse('pizza',[])
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM meals').fetchone()[0],0)
+
+    def add_ingredients(self):
+        with self.store.connect() as db:
+            for food_id, name, values in [
+                ('cucumber', 'Concombre cru', [16, 1, 2, 0.1, 1]),
+                ('oil', 'Huile olive', [900, 0, 0, 100, 0]),
+                ('unresolved:old', 'Concombres frits', [None] * 5),
+            ]:
+                db.execute('INSERT INTO foods VALUES (?,?,?,?,?,?)',
+                    (food_id, name, normalize(name), 'Ciqual', json.dumps(dict(zip(
+                        ('kcal','protein','carbs','fat','fiber'), values))), '{}'))
+
+    def test_estimated_recipe_uses_seen_components_final_cooked_mass_and_no_exact_alias(self):
+        self.add_ingredients()
+        self.tools.execute('search_foods', {'queries': ['concombre', 'huile']})
+        args = {'label': 'Légumes frits', 'components': [
+            {'food_id': 'cucumber', 'grams': 100, 'ingredient':'concombre cru'}, {'food_id': 'oil', 'grams': 10, 'ingredient':'huile olive'}],
+            'prepared_grams': 80, 'note': 'Concombre cru et 10 g d’huile absorbée ; évaporation à la cuisson.'}
+        food = self.tools.execute('estimate_recipe', args)['food']
+        self.assertEqual(food['per_100g']['kcal'], 132.5)
+        self.assertEqual(food['per_100g']['fat'], 12.625)
+        self.assertTrue(food['reference']['composition_estimated'])
+        self.assertNotIn('source_url', food['reference'])
+        self.assertIsNone(lookup_reference(self.store, 'Légumes frits'))
+        self.assertEqual(self.tools.execute('estimate_recipe', args)['food']['food_id'], food['food_id'])
+        draft = {'items': [{'food_id': food['food_id'], 'grams': 40, 'label': 'Légumes frits'}]}
+        self.tools.validate_selection(draft)
+        self.assertEqual(resolve_items(self.store, draft['items'])[0]['nutrients']['kcal'], 53)
+        self.assertTrue(draft['items'][0]['composition_estimated'])
+        self.assertIn('absorbée', draft['items'][0]['note'])
+        self.assertEqual(self.tools.missing_compositions(draft), [])
+        again = NutritionTools(self.store).execute('search_foods', {'queries': ['Légumes frits']})['results'][0]
+        self.assertFalse(again['reference_match'])
+        self.assertEqual(again['foods'][0]['food_id'], food['food_id'])
+
+    def test_estimation_rejects_unseen_components_invalid_yields_and_unverified_named_reference(self):
+        self.add_ingredients()
+        self.tools.execute('search_foods', {'queries': ['concombre']})
+        args = {'label': 'Légumes frits', 'components': [{'food_id':'oil', 'grams':10, 'ingredient':'huile olive'}],
+                'prepared_grams':10, 'note':'Huile absorbée'}
+        with self.assertRaises(ValueError): self.tools.execute('estimate_recipe', args)
+        self.tools.execute('search_foods', {'queries': ['huile']})
+        with self.assertRaisesRegex(ValueError, 'ne correspond pas'):
+            self.tools.execute('estimate_recipe', dict(args, components=[
+                {'food_id':'oil', 'ingredient':'concombre cru', 'grams':10}]))
+        for mass in (0, 2, True, 1000, float('nan')):
+            with self.assertRaises(ValueError): self.tools.execute('estimate_recipe', dict(args, prepared_grams=mass))
+        self.tools.execute('search_foods', {'queries': [
+            {'label':'Légumes frits', 'brand':'Auchan', 'restaurant':None, 'city':None}]})
+        with self.assertRaisesRegex(ValueError, 'références nommées'):
+            self.tools.execute('estimate_recipe', args)
+
+    def test_recipe_preserves_published_fat_limits_instead_of_rejecting_or_zeroing_them(self):
+        from mymiam.nutrition import nutrient_bounds
+        self.add_ingredients()
+        with self.store.connect() as db:
+            db.execute("UPDATE foods SET nutrients=?, flags=? WHERE id='cucumber'", (
+                json.dumps({'kcal':16, 'protein':1, 'carbs':2, 'fat':None, 'fiber':1}),
+                json.dumps({'fat':'Inférieur à 0.1'})))
+        self.tools.execute('search_foods', {'queries':['concombre cru','huile olive']})
+        result = self.tools.execute('estimate_recipe', {'label':'Concombre sauté',
+            'components':[{'food_id':'cucumber', 'ingredient':'concombre cru','grams':100},
+                          {'food_id':'oil', 'ingredient':'huile olive','grams':10}],
+            'prepared_grams':100, 'note':'100 g de concombre, huile absorbée et évaporation.'})
+        food = result['food']
+        self.assertIsNone(food['per_100g']['fat'])
+        self.assertEqual(food['reference']['nutrient_bounds']['fat'], {
+            'lower':10, 'upper':10.1, 'upper_exclusive':True})
+        draft = {'items':[{'food_id':food['food_id'], 'label':'Concombre sauté', 'grams':50}]}
+        self.assertEqual(self.tools.missing_compositions(draft), [])
+        item = resolve_items(self.store, draft['items'])[0]
+        self.assertIsNone(item['nutrients']['fat'])
+        self.assertEqual(nutrient_bounds(item)['fat'], {'lower':5, 'upper':5.05, 'upper_exclusive':True})
+
+    def test_fried_food_requires_a_fried_reference_or_an_estimate_including_absorbed_fat(self):
+        self.add_ingredients()
+        self.tools.execute('search_foods', {'queries':['concombre cru','huile olive']})
+        draft = {'items':[{'label':'Concombres frits','food_id':'cucumber','grams':80}]}
+        self.assertEqual(self.tools.selection_issues(draft)[0]['kind'], 'preparation')
+        without_oil = self.tools.execute('estimate_recipe', {'label':'Concombre frit',
+            'components':[{'food_id':'cucumber', 'ingredient':'concombre cru','grams':100}],
+            'prepared_grams':100, 'note':'Cuisson supposée.'})['food']
+        draft['items'][0]['food_id'] = without_oil['food_id']
+        self.assertEqual(self.tools.selection_issues(draft)[0]['kind'], 'preparation')
+        food = self.tools.execute('estimate_recipe', {'label':'Concombre cuisiné',
+            'components':[{'food_id':'cucumber', 'ingredient':'concombre cru','grams':100},
+                          {'food_id':'oil', 'ingredient':'huile olive','grams':10}],
+            'prepared_grams':100, 'note':'Huile absorbée pendant la friture.'})['food']
+        draft['items'][0]['food_id'] = food['food_id']
+        self.assertEqual(self.tools.selection_issues(draft), [])
+
+    def test_empty_saved_placeholders_never_short_circuit_catalogue_search(self):
+        self.add_ingredients()
+        result = self.tools.execute('search_foods', {'queries':['Concombres frits']})['results'][0]
+        self.assertTrue(result['estimation_needed'])
+        self.assertEqual(result['foods'], [])
+        self.assertNotIn('unresolved:old', self.tools.found)
+
+    def test_incomplete_final_draft_gets_bounded_repair_and_private_decision_trace(self):
+        self.add_ingredients()
+        initial = {'title':'Mon repas', 'slot':'dinner', 'items': [
+            {'label':'Concombres frits', 'slot':'dinner', 'food_id':None,
+             'grams':80, 'estimated':True, 'note':'Portion supposée'}], 'clarifications':[]}
+        responses = [self.stream([self.call(args={'queries':['Concombres frits']})]),
+            self.stream(text=initial),
+            self.stream([self.call(args={'queries':['concombre','huile']})]),
+            self.stream([self.call('estimate_recipe', {'label':'Concombres frits',
+                'components':[{'food_id':'cucumber','grams':100,'ingredient':'concombre cru'},{'food_id':'oil','grams':10,'ingredient':'huile olive'}],
+                'prepared_grams':80, 'note':'10 g d’huile absorbée et perte d’eau à la cuisson.'})])]
+        sent = []
+        def post(*args, **kwargs):
+            sent.append(json.loads(json.dumps(kwargs['json'])))
+            if responses: return responses.pop(0)
+            with self.store.connect() as db:
+                food_id = db.execute("SELECT id FROM foods WHERE id LIKE 'estimate:%'").fetchone()[0]
+            final = json.loads(json.dumps(initial))
+            final['items'][0]['food_id'] = food_id
+            return self.stream(text=final)
+        with patch('mymiam.openai_plan.requests.post', side_effect=post):
+            result = self.plan.parse('Ce soir des concombres frits', [])
+        self.assertEqual(len(sent), 5)
+        self.assertTrue(any(v.get('role') == 'developer' for v in sent[2]['input']))
+        item = resolve_items(self.store, result['items'])[0]
+        self.assertTrue(all(item['nutrients'][k] is not None for k in ('kcal','protein','carbs','fat')))
+        trace_path = next((self.store.directory/'analysis_traces').glob('*.json'))
+        trace = json.loads(trace_path.read_text())
+        self.assertEqual(trace['status'], 'done')
+        self.assertTrue(trace['repair_requested'])
+        self.assertEqual(trace['missing'], [])
+        self.assertEqual(trace['tools'][-1]['name'], 'estimate_recipe')
+        self.assertNotIn('test-only', trace_path.read_text())
+        self.assertEqual(trace_path.stat().st_mode & 0o777, 0o600)
+
+    def test_unidentifiable_food_stays_partial_after_one_repair_without_fake_energy(self):
+        initial = {'title':'Mon repas', 'slot':'dinner', 'items': [
+            {'label':'xyzzyunknown', 'food_id':None, 'grams':80, 'estimated':True,
+             'note':'Composition impossible à identifier'}], 'clarifications':[]}
+        responses = [self.stream([self.call(args={'queries':['xyzzyunknown']})]),
+                     self.stream(text=initial), self.stream(text=initial)]
+        with patch('mymiam.openai_plan.requests.post', side_effect=responses):
+            result = self.plan.parse('xyzzyunknown', [])
+        self.assertIsNone(result['items'][0]['food_id'])
+        trace = json.loads(next((self.store.directory/'analysis_traces').glob('*.json')).read_text())
+        self.assertEqual(trace['status'], 'partial')
+        self.assertEqual(trace['missing'][0]['label'], 'xyzzyunknown')
+
+    def test_repair_can_recover_from_a_rejected_recipe_component_with_a_bounded_second_pass(self):
+        self.add_ingredients()
+        initial = {'title':'Mon repas', 'slot':'dinner', 'items': [
+            {'label':'Légumes frits','food_id':None,'grams':80,'estimated':True,'note':'Portion supposée'}],
+            'clarifications':[]}
+        invalid = {'label':'Légumes frits', 'components':[
+            {'food_id':'oil', 'ingredient':'concombre cru','grams':100}],
+            'prepared_grams':80, 'note':'Recette supposée'}
+        valid = dict(invalid, components=[
+            {'food_id':'cucumber', 'ingredient':'concombre cru','grams':100},
+            {'food_id':'oil', 'ingredient':'huile olive','grams':10}])
+        responses = [self.stream([self.call(args={'queries':['Légumes frits']})]), self.stream(text=initial),
+            self.stream([self.call(args={'queries':['concombre cru','huile olive']})]),
+            self.stream([self.call('estimate_recipe', invalid)]), self.stream(text=initial),
+            self.stream([self.call('estimate_recipe', valid)])]
+        count = 0
+        def post(*args, **kwargs):
+            nonlocal count
+            count += 1
+            if responses: return responses.pop(0)
+            with self.store.connect() as db:
+                food_id = db.execute("SELECT id FROM foods WHERE id LIKE 'estimate:%'").fetchone()[0]
+            final = json.loads(json.dumps(initial))
+            final['items'][0]['food_id'] = food_id
+            return self.stream(text=final)
+        with patch('mymiam.openai_plan.requests.post', side_effect=post):
+            result = self.plan.parse('Légumes frits', [])
+        self.assertEqual(count, 7)
+        self.assertEqual(resolve_items(self.store, result['items'])[0]['nutrients']['kcal'], 106)
+        trace = json.loads(next((self.store.directory/'analysis_traces').glob('*.json')).read_text())
+        self.assertEqual(trace['status'], 'done')
+        self.assertTrue(any('error' in tool for tool in trace['tools']))
 
     def test_live_workflow_research_save_then_reuse_without_web(self):
         query='Prosciutto e Funghi Tripletta Bordeaux'

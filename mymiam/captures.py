@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import requests
 
 from .nutrition import NUTRIENTS, finite_number, normalize, resolve_items
-from .openai_plan import PlanError
+from .openai_plan import PlanError, protected_write
 from .catalogue import matches_for
 from .references import reference_food
 
@@ -158,7 +158,8 @@ class CaptureWorker:
                        ('analysing', time.time(), job['id']))
         try:
             text = job['text']
-            context = {'day': job['day'], 'slot_hint': job['slot_hint'], 'local_hour': datetime.now().hour}
+            context = {'day': job['day'], 'slot_hint': job['slot_hint'], 'local_hour': datetime.now().hour,
+                       'capture_id': job['id']}
             with self.store.connect() as db:
                 row = db.execute('SELECT * FROM capture_reanalyses WHERE capture_id=?', (job['id'],)).fetchone()
                 reanalysis = dict(row) if row else None
@@ -215,6 +216,10 @@ class CaptureWorker:
         with self.store.connect() as db:
             db.execute("UPDATE captures SET status='failed',error=?,updated=? WHERE id=? AND status!='cancelled'",
                        (message[:500], time.time(), job['id']))
+        trace_path = self.store.directory / 'analysis_traces' / (job['id'] + '.json')
+        if trace_path.exists():
+            trace = json.loads(trace_path.read_text())
+            protected_write(trace_path, dict(trace, status='failed', error=message[:500]))
 
     def cleanup(self):
         with self.store.connect() as db:

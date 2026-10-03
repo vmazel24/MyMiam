@@ -1,5 +1,5 @@
 """Shared catalogue matching; no model or nutrition generation."""
-from .nutrition import normalize, search_foods
+from .nutrition import normalize, search_foods, STOP
 
 
 def matches_for(store, label):
@@ -28,7 +28,12 @@ def matches_for(store, label):
         elif words and words[0] in ('biere', 'bieres') and 'blonde' in words:
             matches = search_foods(store, 'biere coeur marche', 5)
     if not matches:
-        words = [word for word in normalize(label).split() if len(word) > 2]
-        cooking = [word for word in words if word in ('cuit', 'cru') and word not in words[:2]]
-        matches = search_foods(store, ' '.join(words[:2] + cooking), 5) if words else []
+        # Drop descriptive wording, never the defining ingredients or cooking
+        # method. "Salade composée de pâtes" must still contain pasta;
+        # "viande hachée de boeuf" must not become a dehydrated prepared meal.
+        neutral = STOP | {'composee', 'compose', 'facon', 'style', 'type',
+                          'portion', 'assiette', 'part', 'standard', 'classique',
+                          'entierement', 'restaurant', 'maison', 'libanais', 'libanaise'}
+        words = [word for word in words if word not in neutral and not word.isdigit()]
+        matches = search_foods(store, ' '.join(words), 5) if words else []
     return matches

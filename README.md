@@ -144,19 +144,33 @@ Le chargeur ne lit que ces deux chemins contrôlés. Les skills sont intégrés 
 instructions de ce workflow ; il ne s'agit pas d'un upload de skill hébergé ni
 d'une installation dans le profil global de Codex.
 
-Luna dispose de deux fonctions locales, regroupées dans `nutrition` :
+Luna dispose de cinq fonctions locales, regroupées dans `nutrition` :
 `search_foods` recherche plusieurs aliments dans Ciqual et les produits Open Food
 Facts déjà enregistrés ; `calculate_portions` calcule les nutriments de portions
-à partir des résultats trouvés. Aucun accès système ou aux identifiants de compte
+à partir des résultats trouvés ; `research_food` vérifie les sources publiques ;
+`save_recipe` mémorise une recette de restaurant vérifiée ; `estimate_recipe`
+calcule un plat sans fiche à partir de composants déjà recherchés et du poids
+final comestible après cuisson. Cette estimation conserve ses hypothèses sans
+créer d'alias exact de marque ou restaurant. Les composants, les limites publiées
+et la cohérence du poids final sont contrôlés côté serveur.
+Aucun accès système ou aux identifiants de compte
 n'est exposé. Garmin, objectifs et statistiques restent des calculs de MyMiam.
 
 La première étape requiert un appel d'outil ; normalement une recherche groupée
-puis la fiche finale suffisent. Au maximum trois étapes d'outils, six appels et
-une réponse finale sans outils. Les appels utilisent toujours Luna et le quota
+puis la fiche finale suffisent. Les captures simples restent limitées à quatre
+réponses ; recherche publique, estimation ou correction peuvent aller jusqu'à
+sept, et jusqu'à dix si une correction doit récupérer une erreur d'outil. Les
+appels d'outils sont limités à douze (seize pour cette seconde correction), les
+recherches publiques à deux. Le serveur vérifie l'énergie, les P/G/L et certaines
+incompatibilités de préparation avant d'accepter la fiche. Les appels utilisent toujours Luna et le quota
 du forfait connecté, sans clé API ni repli payant. Le total des jetons et les noms
 d'outils sont consignés dans `instance/last_usage.json`, sans le récit ni les
 arguments. Une recherche locale peut nécessiter un échange supplémentaire avec
 Luna et consomme donc davantage du quota qu'une fiche sans recherche.
+Les cent dernières analyses disposent aussi d'une trace privée dans
+`instance/analysis_traces/` : recherches, résultats, choix, erreurs et compositions
+manquantes, sans jetons de connexion. Ces traces contiennent des données alimentaires
+personnelles et restent hors du dépôt et des routes publiques.
 
 Les identifiants retenus doivent avoir été retournés par les outils pour ce
 repas ; le serveur les vérifie puis recalcule les nutriments. Il conserve le choix
@@ -180,8 +194,11 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
   [Source et conditions](https://ciqual.anses.fr/cms/fr/telechargement).
 - **Open Food Facts**, ODbL : recherche par code-barres, provenance conservée dans
   chaque aliment. La base n'est pas redistribuée dans ce dépôt. [Documentation](https://openfoodfacts.github.io/openfoodfacts-server/api/).
-- Les valeurs absentes, traces et limites de détection restent inconnues. Si une
-  valeur manque dans un aliment, le total de ce nutriment reste inconnu.
+- Les valeurs absentes et traces restent inconnues. Les limites de détection
+  chiffrées restent des intervalles, également dans les recettes estimées. Si une
+  vraie valeur manque, le total complet reste inconnu ; les valeurs déjà connues
+  sont affichées comme sous-total « ≥ », avec le nombre d'aliments manquants.
+  Une journée sans total énergétique calculable est exclue des statistiques de déficit.
 - Luna propose des aliments et des poids ; le serveur calcule les nutriments
   depuis les correspondances du catalogue, indépendamment des chiffres fournis
   par le navigateur. Les portions estimées et hypothèses restent visibles.
@@ -313,7 +330,8 @@ résultat dans le journal une fois le traitement réussi. Les repas issus d'une
 même saisie sont remplacés ensemble pour éviter les doublons. L'ancien résultat
 reste visible en cas d'échec ou d'annulation ; une modification pendant le
 traitement empêche le remplacement. Les aliments sans kcal rendent le bilan
-incomplet, ce qui est indiqué sur la carte du repas.
+partiel, ce qui est indiqué sur la carte du repas. Les sous-totaux connus restent
+visibles dans le journal, le Dashboard et le tableau des tendances.
 
 La dictée affiche ses résultats provisoires dans un champ en lecture seule.
 Sur Android, la reconnaissance reprend après les pauses en séparant les phrases,

@@ -302,15 +302,16 @@ function renderDashboard() {
   const logged = s.has_meals || s.complete;
   const ga = s.garmin;
   const intake = logged ? s.intake.kcal : null;
+  const partial = logged && s.nutrition_coverage?.kcal?.missing_items > 0;
   const overGoal = intake != null && goal != null && intake > goal;
   document
     .querySelector(".energy-card")
     .classList.toggle("is-over-goal", overGoal);
   $("intake-kcal").innerHTML =
-    `<span>${fmt(intake)}</span><span class="intake-goal">/ ${fmt(goal)}<small>kcal</small></span>`;
+    `<span>${coveredValue({ kcal: intake }, {}, s.nutrition_coverage, "kcal", 0)}</span><span class="intake-goal">/ ${fmt(goal)}<small>kcal</small></span>`;
   $("intake-kcal").setAttribute(
     "aria-label",
-    `Calories consommées : ${fmt(intake)} kcal ; objectif : ${fmt(goal)} kcal`,
+    `Calories consommées : ${coveredValue({ kcal: intake }, {}, s.nutrition_coverage, "kcal", 0)} kcal${partial ? "; bilan partiel" : ""} ; objectif : ${fmt(goal)} kcal`,
   );
   $("expenditure-label").textContent = ga?.has_data
     ? ga.partial
@@ -381,7 +382,9 @@ function renderDashboard() {
   }
   $("energy-caption").textContent =
     s.intake.kcal == null
-      ? "Certaines valeurs alimentaires sont manquantes."
+      ? partial
+        ? `Bilan partiel : ${fmt(s.nutrition_coverage.kcal.known)} kcal déjà comptées ; ${s.nutrition_coverage.kcal.missing_items} aliment(s) sans estimation. Le bilan énergétique reste en attente.`
+        : "Certaines valeurs alimentaires sont manquantes."
       : !s.has_meals
         ? "Aucun repas saisi. Garmin renseigne la dépense, pas les apports."
         : goal == null
@@ -391,11 +394,15 @@ function renderDashboard() {
             : s.intake.kcal === goal
               ? "Objectif atteint."
               : `${fmt(goal - s.intake.kcal)} kcal jusqu’à ton objectif.`;
-  $("day-state").textContent = s.projected
-    ? "Journée en cours"
-    : s.complete
-      ? "Bilan actualisé"
-      : "Journée non saisie";
+  $("day-state").textContent = partial
+    ? s.projected
+      ? "En cours · bilan partiel"
+      : "Bilan partiel"
+    : s.projected
+      ? "Journée en cours"
+      : s.complete
+        ? "Bilan actualisé"
+        : "Journée non saisie";
   $("expenditure-note").textContent = ga?.has_data
     ? goal == null
       ? `Dépense issue de Garmin.${s.projected ? " Total provisoire." : ""} Complète ton profil pour définir le déficit cible et ton objectif.`
@@ -417,7 +424,7 @@ function renderDashboard() {
           target && (value != null || bounds)
             ? Math.min(100, ((value ?? bounds.lower) / target) * 100)
             : 0;
-      return `<article class="macro-card ${key}"><div class="macro-top">${name}</div><div class="macro-number">${nutrientValue(value, bounds)} <small>g</small></div>${bounds ? '<p class="footnote">Plage calculée depuis les limites de la source.</p>' : ""}<p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="4" rx="2"></rect></svg></article>`;
+      return `<article class="macro-card ${key}"><div class="macro-top">${name}</div><div class="macro-number">${coveredValue({ [key]: value }, { [key]: bounds }, s.nutrition_coverage, key)} <small>g</small></div>${bounds ? '<p class="footnote">Plage calculée depuis les limites de la source.</p>' : s.nutrition_coverage?.[key]?.missing_items ? '<p class="footnote">Sous-total connu · bilan partiel.</p>' : ""}<p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="4" rx="2"></rect></svg></article>`;
     })
     .join("");
   $("garmin-day").innerHTML = ga?.has_data
@@ -440,12 +447,21 @@ function nutrientValue(value, bounds, decimals = 1) {
     return `${bounds.upper_exclusive ? "<" : "≤"} ${fmt(bounds.upper, 2)}`;
   return `${fmt(bounds.lower, 2)}–${fmt(bounds.upper, 2)}`;
 }
-function macroLine(nutrients, bounds = {}) {
+function coveredValue(nutrients, bounds = {}, coverage = {}, key, digits = 1) {
+  const value = nutrients[key],
+    interval = bounds[key],
+    known = coverage?.[key];
+  if (value != null || interval) return nutrientValue(value, interval, digits);
+  return known?.known_items > 0 && known.missing_items > 0
+    ? `≥ ${fmt(known.known, digits)}`
+    : "—";
+}
+function macroLine(nutrients, bounds = {}, coverage = {}) {
   return `<div class="meal-macros" aria-label="Macros du repas">${Object.entries(
     macroShort,
   )
     .map(([key, label]) => {
-      const value = nutrientValue(nutrients[key], bounds[key]);
+      const value = coveredValue(nutrients, bounds, coverage, key);
       return `<span title="${macroNames[key]}" aria-label="${macroNames[key]} : ${escapeHTML(value)} g"><b>${label}</b> ${escapeHTML(value)} g</span>`;
     })
     .join("")}</div>`;
@@ -501,7 +517,7 @@ function renderMeals() {
       )
       .join("");
   const mealMarkup = (m, expanded) =>
-    `<article class="meal-card" data-meal-id="${m.id}" aria-busy="${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j))}"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${macroLine(m.totals, m.totals_bounds)}${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}${m.items.some((i) => i.nutrients.kcal == null) ? `<p class="review-note">Bilan incomplet : ${m.items.filter((i) => i.nutrients.kcal == null).length} aliment(s) sans calories estimées.</p>` : ""}${mealAnalysisStatus(m)}${m.text?.trim().length >= 3 ? `<button class="text-button reanalyse-meal" ${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j)) ? "disabled" : ""} data-reanalyse-meal="${m.id}" title="Relancer Luna sur le récit d’origine et remplacer son analyse">Réanalyser la saisie ↻</button>` : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
+    `<article class="meal-card" data-meal-id="${m.id}" aria-busy="${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j))}"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${macroLine(m.totals, m.totals_bounds, m.nutrition_coverage)}${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}${m.items.some((i) => i.nutrients.kcal == null) ? `<p class="review-note">Bilan partiel : ${m.items.filter((i) => i.nutrients.kcal == null).length} aliment(s) sans calories estimées. « ≥ » indique le sous-total déjà connu.</p>` : ""}${mealAnalysisStatus(m)}${m.text?.trim().length >= 3 ? `<button class="text-button reanalyse-meal" ${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j)) ? "disabled" : ""} data-reanalyse-meal="${m.id}" title="Relancer Luna sur le récit d’origine et remplacer son analyse">Réanalyser la saisie ↻</button>` : ""}</div><div class="meal-calories">${coveredValue(m.totals, m.totals_bounds, m.nutrition_coverage, "kcal", 0)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
   const refinements = (meal) =>
     (meal.clarifications || [])
       .map((group, index) =>
@@ -518,7 +534,31 @@ function renderMeals() {
         const kcal = group.some((meal) => meal.totals.kcal == null)
           ? null
           : group.reduce((sum, meal) => sum + meal.totals.kcal, 0);
-        return `<section class="meal-period" data-slot="${slot}" aria-label="Repas du créneau ${label}"><div class="section-head meal-period-header"><h3><span aria-hidden="true">${symbols[slot]}</span> ${label}${group.length ? `<small>${fmt(kcal)} kcal</small>` : ""}</h3><button class="text-button" data-action="new-meal" data-slot="${slot}" aria-label="Ajouter un repas · ${label}">Ajouter ＋</button></div>${group.length ? group.map((meal) => `<div class="meal-entry">${mealMarkup(meal, expanded)}${refinements(meal)}</div>`).join("") : '<p class="meal-period-empty">Aucun repas saisi.</p>'}</section>`;
+        const coverage = {
+          kcal: {
+            known: group.reduce(
+              (sum, meal) =>
+                sum +
+                (meal.totals.kcal ?? meal.nutrition_coverage?.kcal?.known ?? 0),
+              0,
+            ),
+            known_items: group.reduce(
+              (sum, meal) =>
+                sum +
+                (meal.nutrition_coverage?.kcal?.known_items ??
+                  (meal.totals.kcal != null ? 1 : 0)),
+              0,
+            ),
+            missing_items: group.reduce(
+              (sum, meal) =>
+                sum +
+                (meal.nutrition_coverage?.kcal?.missing_items ??
+                  (meal.totals.kcal == null ? 1 : 0)),
+              0,
+            ),
+          },
+        };
+        return `<section class="meal-period" data-slot="${slot}" aria-label="Repas du créneau ${label}"><div class="section-head meal-period-header"><h3><span aria-hidden="true">${symbols[slot]}</span> ${label}${group.length ? `<small>${coveredValue({ kcal }, {}, coverage, "kcal", 0)} kcal</small>` : ""}</h3><button class="text-button" data-action="new-meal" data-slot="${slot}" aria-label="Ajouter un repas · ${label}">Ajouter ＋</button></div>${group.length ? group.map((meal) => `<div class="meal-entry">${mealMarkup(meal, expanded)}${refinements(meal)}</div>`).join("") : '<p class="meal-period-empty">Aucun repas saisi.</p>'}</section>`;
       })
       .join("");
   $("today-meals").innerHTML = markup(false);
@@ -550,7 +590,11 @@ function loadCaptures() {
         renderCaptures();
         renderMeals();
         if (state.view === "trends") await loadTrends();
-        toast("Repas enregistré. Le bilan est à jour.");
+        toast(
+          state.summary?.nutrition_coverage?.kcal?.missing_items
+            ? "Repas enregistré · bilan encore partiel."
+            : "Repas enregistré. Le bilan est à jour.",
+        );
       }
     });
   captureReads.set(key, task);
@@ -1158,7 +1202,7 @@ function renderTrends() {
     .reverse()
     .map(
       (d) =>
-        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? `${balanceValue(d.deficit)} ${balanceTag(d.deficit)}` : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.projected ? "Provisoire" : d.complete ? "Actualisé" : "Non saisie"}</span></td></tr>`,
+        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? coveredValue(d.intake, d.intake_bounds, d.nutrition_coverage, "kcal", 0) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? `${balanceValue(d.deficit)} ${balanceTag(d.deficit)}` : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.nutrition_coverage?.kcal?.missing_items ? "Bilan partiel" : d.projected ? "Provisoire" : d.complete ? "Actualisé" : "Non saisie"}</span></td></tr>`,
     )
     .join("");
 }

@@ -41,6 +41,19 @@ def food_record(row):
 def search_foods(store, query, limit=12):
     query = normalize(query)
     words = [w for w in query.split() if w not in STOP]
+    cooking = {'cuite': 'cuit', 'cuites': 'cuit', 'cuits': 'cuit', 'crue': 'cru', 'crues': 'cru'}
+    words = [cooking.get(w, w) for w in words]
+    if 'viande' in words and any(w in words for w in ('boeuf', 'veau', 'poulet', 'porc', 'agneau')):
+        words.remove('viande')
+    if 'hachee' in words:
+        words = ['hache' if w == 'hachee' else w for w in words]
+    if 'oeuf' in words and 'entier' in words:
+        # Ciqual's "Oeuf cru/dur" already means the whole egg. Partial eggs
+        # remain excluded below, rather than substituting white for whole egg.
+        words.remove('entier')
+    beverage = words and words[0] in ('cafe', 'the', 'lait') and not set(words) & {'moulu', 'poudre', 'grain', 'grains'}
+    if words and words[0] == 'cafe' and 'noir' in words:
+        words.remove('noir')
     if "poulet" in words and "blanc" in words:
         words = ["filet" if w == "blanc" else w for w in words]
     if "jambon" in words and "blanc" in words:
@@ -52,14 +65,23 @@ def search_foods(store, query, limit=12):
         rows = db.execute("SELECT * FROM foods").fetchall()
     scored = []
     for row in rows:
+        # A journal placeholder is not a reusable nutritional reference. Otherwise
+        # an exact-name match can keep returning yesterday's empty composition.
+        if row['id'].startswith('unresolved:'):
+            continue
         text = row["normalized"]
         tokens = set(text.split())
+        if beverage and tokens & {'moulu', 'poudre', 'grain', 'grains'}:
+            continue
+        if 'oeuf' in words and 'entier' in query.split() and tokens & {'blanc', 'jaune'}:
+            continue
         def matches_word(word):
             if word == "cuit":
                 return any(t.startswith(("cuit", "grill", "poel", "roti", "bouilli", "vapeur")) for t in tokens)
             if word == "cru":
                 return any(t.startswith("cru") for t in tokens)
-            return word in tokens or (len(word) > 3 and any(t.startswith(word) for t in tokens))
+            variants = [word, word[:-1]] if len(word) > 4 and word.endswith('s') else [word]
+            return any(w in tokens or len(w) > 3 and any(t.startswith(w) for t in tokens) for w in variants)
         matches = sum(matches_word(w) for w in words)
         if matches != len(words):
             continue
@@ -67,9 +89,10 @@ def search_foods(store, query, limit=12):
         if text.startswith(query):
             score += 12
         if text.split()[0] in words:
-            score += 15
+            score += 75
         qualifiers = {"bio", "pane", "foie", "coeur", "grecque", "sucre", "creme", "chevre", "brebis", "bifidus"}
-        score -= 12 * len((tokens & qualifiers) - set(words))
+        score -= 12 * sum(any(token.startswith(q) for token in tokens) and
+                          not any(word.startswith(q) for word in words) for q in qualifiers)
         scored.append((score, food_record(row)))
     return [v for _, v in sorted(scored, key=lambda pair: pair[0], reverse=True)[:limit]]
 
@@ -93,6 +116,7 @@ def resolve_items(store, inputs):
                            "label": str(item.get('label') or item.get('name') or food['name'])[:150],
                            "grams": grams, "estimated": bool(item.get("estimated", False)),
                            "source_url": reference.get('source_url') if reference else None,
+                           "nutrient_ranges": reference.get('nutrient_bounds', {}) if reference else {},
                            "composition_estimated": bool(item.get('composition_estimated') or
                                reference and reference.get('composition_estimated') or
                                food['source'].startswith('Ciqual') and 'aliment moyen' in normalize(food['name'])),
@@ -108,11 +132,27 @@ def totals(items):
             else round(sum(i["nutrients"].get(key, 0) for i in items), 1) for key in NUTRIENTS}
 
 
+def nutrition_coverage(items):
+    """Display known subtotals without using them as complete energy balances."""
+    return {key: {'known': round(sum(i['nutrients'].get(key) or 0 for i in items), 1),
+                  'known_items': sum(i['nutrients'].get(key) is not None for i in items),
+                  'missing_items': sum(i['nutrients'].get(key) is None and
+                                       key not in i.get('nutrient_bounds', {}) for i in items)}
+            for key in NUTRIENTS}
+
+
 def nutrient_bounds(item):
     """Keep a published detection limit as an interval, never an invented zero."""
     bounds = {}
+    stored = item.get('nutrient_ranges') or item.get('reference', {}).get('nutrient_bounds', {})
     for key in NUTRIENTS:
         if item['nutrients'].get(key) is not None:
+            continue
+        if key in stored:
+            interval = stored[key]
+            bounds[key] = dict(interval,
+                lower=round(interval['lower'] * item['grams'] / 100, 6),
+                upper=round(interval['upper'] * item['grams'] / 100, 6))
             continue
         flag = str(item.get('flags', {}).get(key, '')).strip()
         match = re.fullmatch(r'(Inférieur à|<|≤)\s*(\d+(?:[.,]\d+)?)', flag, re.I)

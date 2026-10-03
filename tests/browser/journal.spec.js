@@ -1486,3 +1486,109 @@ test("energy balances use unsigned amounts and explicit tags for deficit surplus
     fullPage: true,
   });
 });
+
+test("partial nutrition shows known subtotals without inventing a complete balance", async ({
+  page,
+}, info) => {
+  const unknown = {
+    kcal: null,
+    protein: null,
+    carbs: null,
+    fat: null,
+    fiber: null,
+  };
+  const known = { kcal: 260, protein: 5.2, carbs: 56, fat: 0.6, fiber: 0.8 };
+  const coverage = Object.fromEntries(
+    Object.entries(known).map(([key, value]) => [
+      key,
+      {
+        known: value,
+        known_items: 1,
+        missing_items: 1,
+      },
+    ]),
+  );
+  await page.route("**/api/dashboard?**", async (route) => {
+    const day = new URL(route.request().url()).searchParams.get("day");
+    await route.fulfill({
+      json: {
+        day,
+        meals: [
+          {
+            id: "partial-meal",
+            day,
+            slot: "dinner",
+            title: "Mon dîner",
+            text: "Riz et un aliment inconnu",
+            items: [
+              { ...food, food_id: food.id, grams: 200, nutrients: known },
+              {
+                food_id: "unknown",
+                name: "Aliment inconnu",
+                source: "Composition à préciser",
+                flags: {},
+                grams: 40,
+                nutrients: unknown,
+              },
+            ],
+            totals: unknown,
+            nutrition_coverage: coverage,
+            clarifications: [],
+          },
+        ],
+        intake: unknown,
+        nutrition_coverage: coverage,
+        has_meals: true,
+        complete: true,
+        expenditure: 2200,
+        expenditure_source: "Estimation du profil",
+        resting: 1800,
+        projected: false,
+        targets: { kcal: 2000, protein: 100, carbs: 200, fat: 70 },
+        target_deficit: 200,
+        deficit: null,
+        garmin: null,
+      },
+    });
+  });
+  await page.locator("#previous-day").click();
+  await expect(page.locator("#intake-kcal")).toContainText("≥ 260");
+  await expect(page.locator("#day-state")).toHaveText("Bilan partiel");
+  await expect(page.locator("#energy-caption")).toContainText(
+    "1 aliment(s) sans estimation",
+  );
+  await expect(page.locator("#energy-pct")).toHaveText("—");
+  await expect(page.locator("#deficit-value")).toHaveText("—");
+  await expect(page.locator("#energy-progress")).toHaveAttribute(
+    "stroke-dasharray",
+    "0 100",
+  );
+  await expect(
+    page.locator("#macro-cards .protein .macro-number"),
+  ).toContainText("≥ 5,2");
+  await page
+    .getByRole("button", { name: "Journal des repas", exact: true })
+    .click();
+  await expect(page.locator("#journal-meals .meal-calories")).toContainText(
+    "≥ 260",
+  );
+  await expect(
+    page.locator("#journal-meals .meal-period-header h3").last(),
+  ).toContainText("≥ 260");
+  await expect(page.locator("#journal-meals .meal-macros")).toContainText(
+    "P ≥ 5,2",
+  );
+  await expect(page.locator("#journal-meals .meal-food").first()).toContainText(
+    "260 kcal",
+  );
+  await expect(page.locator("#journal-meals .meal-food").last()).toContainText(
+    "— kcal",
+  );
+  await expect(page.locator("#journal-meals .review-note")).toContainText(
+    "sous-total déjà connu",
+  );
+  await page.screenshot({
+    path: info.outputPath("partial-nutrition.png"),
+    fullPage: true,
+  });
+});
