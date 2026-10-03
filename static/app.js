@@ -1066,14 +1066,14 @@ function deficitChart(days, cumulative) {
     direction = fat ? -1 : 1;
   let running = 0;
   const values = days.map((d) => {
-    if (d.day >= today() || d.deficit == null) return null;
+    if (d.day > today() || d.deficit == null) return null;
     running += d.deficit;
     return cumulative ? running : d.deficit;
   });
   // Keep energy signs for deficit/surplus colors; project fat loss downwards.
   const known = values.filter((v) => v != null).map((v) => direction * v);
   if (!known.length)
-    return '<div class="empty-state chart-empty"><p>Ton premier bilan apparaîtra après une journée passée avec des repas saisis.</p></div>';
+    return '<div class="empty-state chart-empty"><p>Ajoute des repas pour afficher ton bilan, y compris celui de la journée en cours.</p></div>';
   const width = 500,
     height = 220,
     left = 48,
@@ -1102,13 +1102,13 @@ function deficitChart(days, cumulative) {
   }
   svg += `<line class="zero-line" x1="${left}" x2="${width - right}" y1="${y(0)}" y2="${y(0)}"/>`;
   let segment = [];
-  function flush() {
+  function flush(provisional = false) {
     if (segment.length > 1) {
       let part = [segment[0]],
         surplus = segment[0].value < 0;
       function draw() {
         if (part.length > 1)
-          svg += `<polyline class="deficit-line${surplus ? " surplus" : ""}" points="${part.map((p) => `${p.x},${y(p.value)}`).join(" ")}"/>`;
+          svg += `<polyline class="deficit-line${surplus ? " surplus" : ""}${provisional ? " provisional" : ""}" points="${part.map((p) => `${p.x},${y(p.value)}`).join(" ")}"/>`;
       }
       for (const point of segment.slice(1)) {
         const previous = part[part.length - 1];
@@ -1144,20 +1144,28 @@ function deficitChart(days, cumulative) {
       flush();
       return;
     }
-    const title = `${days[i].day} · ${fat ? "Variation équivalente" : "Bilan"}${cumulative ? (fat ? " cumulée" : " cumulé") : ""} : ${chartBalanceValue(value)} · ${balanceStatus(value)}`;
+    const provisional = days[i].day === today(),
+      title = `${days[i].day} · ${fat ? "Variation équivalente" : "Bilan"}${cumulative ? (fat ? " cumulée" : " cumulé") : ""} : ${chartBalanceValue(value)} · ${balanceStatus(value)}${provisional ? " · Provisoire, journée en cours" : ""}`;
     if (cumulative) {
-      segment.push({ x: x(i), value });
-      svg += `<circle class="deficit-point ${value < 0 ? "surplus" : ""}" data-day="${days[i].day}" data-value="${value}" cx="${x(i)}" cy="${y(value)}" r="3.5"><title>${escapeHTML(title)}</title></circle>`;
+      const point = { x: x(i), value };
+      if (provisional) {
+        const previous = segment.at(-1);
+        flush();
+        if (previous) segment = [previous, point];
+        flush(true);
+      } else segment.push(point);
+      svg += `<circle class="deficit-point ${value < 0 ? "surplus" : ""}${provisional ? " provisional" : ""}" data-day="${days[i].day}" data-value="${value}" cx="${x(i)}" cy="${y(value)}" r="${provisional ? 4.5 : 3.5}"><title>${escapeHTML(title)}</title></circle>`;
     } else {
       const barWidth = Math.max(1, Math.min(18, step * 0.62));
       const barHeight = Math.abs(y(value) - y(0));
-      svg += `<rect class="deficit-bar ${value < 0 ? "surplus" : ""}" data-day="${days[i].day}" data-value="${value}" x="${x(i) - barWidth / 2}" y="${value === 0 ? y(0) - 1 : Math.min(y(value), y(0))}" width="${barWidth}" height="${Math.max(2, barHeight)}" rx="2"><title>${escapeHTML(title)}</title></rect>`;
+      svg += `<rect class="deficit-bar ${value < 0 ? "surplus" : ""}${provisional ? " provisional" : ""}" data-day="${days[i].day}" data-value="${value}" x="${x(i) - barWidth / 2}" y="${value === 0 ? y(0) - 1 : Math.min(y(value), y(0))}" width="${barWidth}" height="${Math.max(2, barHeight)}" rx="2"><title>${escapeHTML(title)}</title></rect>`;
     }
   });
   flush();
   days.forEach((d, i) => {
-    if (i % Math.max(1, Math.ceil(days.length / 5)) === 0)
-      svg += `<text text-anchor="middle" x="${x(i)}" y="${height - 8}">${d.day.slice(8)}/${d.day.slice(5, 7)}</text>`;
+    const current = d.day === today();
+    if (current || i % Math.max(1, Math.ceil(days.length / 5)) === 0)
+      svg += `<text text-anchor="${current ? "end" : "middle"}" x="${x(i)}" y="${height - 8}">${current ? "J · provisoire" : `${d.day.slice(8)}/${d.day.slice(5, 7)}`}</text>`;
   });
   return svg + "</svg>";
 }

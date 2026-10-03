@@ -969,10 +969,15 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
   );
   await page.locator("#dashboard-period").selectOption("7");
   const daily = page.locator("#daily-deficit-chart .deficit-bar");
-  await expect(daily).toHaveCount(3);
+  await expect(daily).toHaveCount(4);
   expect(
     await daily.evaluateAll((els) => els.map((e) => Number(e.dataset.value))),
-  ).toEqual([300, -100, 0]);
+  ).toEqual([300, -100, 0, 900]);
+  await expect(daily.last()).toHaveClass(/provisional/);
+  await expect(daily.last().locator("title")).toContainText("Provisoire");
+  await expect(page.locator("#daily-deficit-chart svg")).toContainText(
+    "J · provisoire",
+  );
   await expect(page.locator("#daily-deficit-chart .surplus")).toHaveCount(1);
   const zeroY = Number(
     await page.locator("#daily-deficit-chart .zero-line").getAttribute("y1"),
@@ -986,10 +991,14 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
     await cumulative.evaluateAll((els) =>
       els.map((e) => Number(e.dataset.value)),
     ),
-  ).toEqual([300, 200, 200]);
+  ).toEqual([300, 200, 200, 1100]);
   await expect(
     page.locator("#cumulative-deficit-chart .deficit-line"),
+  ).toHaveCount(2);
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-line.provisional"),
   ).toHaveCount(1);
+  await expect(cumulative.last()).toHaveClass(/provisional/);
   await expect(page.locator("#dashboard-kpis")).toContainText("≈ 0,021 kg");
   await page
     .getByRole("combobox", { name: "Unité des bilans" })
@@ -1012,6 +1021,85 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
     path: info.outputPath("dashboard-charts.png"),
     fullPage: true,
   });
+});
+
+test("today can be the first plotted balance and missing or future balances stay excluded", async ({
+  page,
+}) => {
+  const day = localDay();
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  const tomorrow = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+  let current = 500,
+    history = [];
+  await page.route("**/api/trends?**", (route) =>
+    route.fulfill({
+      json: {
+        days: [
+          ...history,
+          { day, deficit: current },
+          { day: tomorrow, deficit: 2000 },
+        ],
+        cumulative_deficit: history.length ? 500 : 0,
+        covered_days: history.length,
+        elapsed_days: history.length,
+        weights: [],
+      },
+    }),
+  );
+  await page.locator("#dashboard-period").selectOption("7");
+  await expect(page.locator("#daily-deficit-chart .deficit-bar")).toHaveCount(
+    1,
+  );
+  await expect(
+    page.locator("#daily-deficit-chart .deficit-bar.provisional"),
+  ).toHaveAttribute("data-value", "500");
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-point.provisional"),
+  ).toHaveAttribute("data-value", "500");
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-line"),
+  ).toHaveCount(0);
+  await expect(page.locator("#dashboard-kpis")).toContainText("0 / 0");
+  current = null;
+  await page.locator("#dashboard-period").selectOption("30");
+  await expect(page.locator("#daily-deficit-chart .deficit-bar")).toHaveCount(
+    0,
+  );
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-point"),
+  ).toHaveCount(0);
+  await expect(page.locator("#daily-deficit-chart")).toContainText(
+    "Ajoute des repas",
+  );
+  const past = new Date();
+  past.setDate(past.getDate() - 1);
+  history = [
+    {
+      day: `${past.getFullYear()}-${String(past.getMonth() + 1).padStart(2, "0")}-${String(past.getDate()).padStart(2, "0")}`,
+      deficit: 500,
+    },
+  ];
+  current = -1000;
+  await page.locator("#dashboard-period").selectOption("7");
+  await expect(
+    page.locator(
+      "#cumulative-deficit-chart .deficit-point.provisional.surplus",
+    ),
+  ).toHaveAttribute("data-value", "-500");
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-line.provisional"),
+  ).toHaveCount(2);
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-line.provisional.surplus"),
+  ).toHaveCount(1);
+  await page
+    .getByRole("combobox", { name: "Unité des bilans" })
+    .selectOption("kcal");
+  await expect(page.locator("#dashboard-kpis")).toContainText("500 kcal");
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-point.provisional title"),
+  ).toContainText("En surplus · Provisoire");
 });
 
 test("fat equivalents are the default across balances charts and trends and the switch is remembered", async ({
@@ -1096,7 +1184,7 @@ test("fat equivalents are the default across balances charts and trends and the 
     "≈ 0,025 kg / jour",
   );
   await expect(page.locator("#daily-deficit-chart .deficit-bar")).toHaveCount(
-    2,
+    3,
   );
   await expect(
     page.locator("#daily-deficit-chart .deficit-bar title").first(),
@@ -1105,8 +1193,18 @@ test("fat equivalents are the default across balances charts and trends and the 
     /Variation équivalente : ≈ \+0,05 kg · En surplus/,
   );
   await expect(
-    page.locator("#cumulative-deficit-chart .deficit-point title").last(),
+    page
+      .locator(
+        "#cumulative-deficit-chart .deficit-point:not(.provisional) title",
+      )
+      .last(),
   ).toHaveText(/≈ -0,05 kg/);
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-point.provisional"),
+  ).toHaveAttribute("data-value", "1272");
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-point.provisional title"),
+  ).toContainText("Provisoire");
   await expect(page.locator("[data-balance-unit]").first()).toHaveText(
     "kg équiv. gras",
   );

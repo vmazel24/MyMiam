@@ -240,8 +240,10 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
   perte équivalente négative vers le bas en vert, gain équivalent positif
   vers le haut en rouge. Les axes et infobulles en kg indiquent ce signe,
   sans transformer cette estimation énergétique en perte de gras mesurée.
-  Les journées manquantes interrompent les graphiques ; aujourd'hui est exclu
-  des bilans définitifs. Sans repas saisi, les
+  Les journées manquantes interrompent les graphiques. Aujourd'hui apparaît
+  sur les courbes avec un repère « J · provisoire » et une liaison pointillée
+  dans le cumul, tout en restant exclu des KPI historiques et bilans définitifs.
+  Sans repas saisi, les
   apports restent affichés inconnus. Le total Garmin observé est présenté
   séparément de l'objectif calculé sur une journée de 24 heures.
   Le journal est organisé en Matin, Midi et Soir, avec ajout direct dans chaque

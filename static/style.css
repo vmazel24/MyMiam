@@ -1083,6 +1083,14 @@ form > .ghost-button {
 .chart .deficit-line.surplus {
   stroke: #c15b4d;
 }
+.chart .deficit-line.provisional {
+  stroke-dasharray: 5 4;
+}
+.chart .deficit-bar.provisional,
+.chart .deficit-point.provisional {
+  opacity: 0.65;
+  stroke-dasharray: 3 2;
+}
 .chart text.balance-axis-deficit {
   fill: #5b962f;
 }
