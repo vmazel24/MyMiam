@@ -497,6 +497,10 @@ p + p {
   display: block;
   margin-top: 5px;
 }
+.energy-footer .target-deficit {
+  margin-top: 6px;
+  color: var(--primary);
+}
 .energy-card .footnote {
   color: #9aa990;
   margin-top: 12px;

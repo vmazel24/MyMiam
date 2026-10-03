@@ -59,6 +59,7 @@ def summary(store, user_id, day):
             "resting": resting, "expenditure": expenditure, "expenditure_source": source,
             "projected": day >= today, "garmin": garmin, "targets": targets(profile, expenditure),
             "target_breakdown": target_breakdown,
+            "target_deficit": profile["deficit"] if profile else None,
             "deficit": deficit, "estimated_portions": sum(bool(i.get("estimated")) for i in items),
             "missing_nutrients": sum(any(v is None for v in i["nutrients"].values()) for i in items)}
 

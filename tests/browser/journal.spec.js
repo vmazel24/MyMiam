@@ -1160,6 +1160,7 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
         resting: 2300,
         deficit: expenditure - 2300,
         projected: true,
+        target_deficit: 200,
         target_breakdown: {
           base: 2300,
           active,
@@ -1194,6 +1195,10 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
     /2\s300\s*\/ 2\s700kcal/,
   );
   await expect(page.locator("#target-value")).toHaveText(/2\s700 kcal/);
+  await expect(page.locator("#target-deficit")).toBeVisible();
+  await expect(page.locator("#target-deficit")).toHaveText(
+    "Déficit cible : −200 kcal",
+  );
   await expect(page.locator("#energy-pct")).toHaveText("85%");
   await expect(page.locator("#energy-caption")).toHaveText(
     "400 kcal jusqu’à ton objectif.",

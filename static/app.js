@@ -296,6 +296,11 @@ function renderDashboard() {
   $("expenditure-value").textContent =
     displayedExpenditure == null ? "—" : fmt(displayedExpenditure) + " kcal";
   $("target-value").textContent = goal == null ? "—" : fmt(goal) + " kcal";
+  $("target-deficit").hidden = s.target_deficit == null;
+  $("target-deficit").textContent =
+    s.target_deficit == null
+      ? ""
+      : `Déficit cible : ${s.target_deficit > 0 ? "−" : ""}${fmt(s.target_deficit)} kcal`;
   $("deficit-value").textContent =
     s.deficit == null
       ? "—"
