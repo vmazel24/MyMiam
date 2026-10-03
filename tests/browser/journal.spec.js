@@ -867,6 +867,73 @@ test("Garmin expenditure is distinct from unlogged food calories", async ({
   await expect(page.locator("#energy-pct")).toHaveText("—");
 });
 
+test("daily consumption shows its actual target and an overshoot in red", async ({
+  page,
+}, info) => {
+  const data = {
+    day: localDay(),
+    meals: [],
+    has_meals: true,
+    complete: true,
+    intake: { kcal: 2986.9, protein: 110, carbs: 349, fat: 97 },
+    targets: { kcal: 2227, protein: 110, carbs: 250, fat: 85 },
+    resting: 1860,
+    expenditure: 2427,
+    deficit: -559.9,
+    projected: false,
+    garmin: null,
+  };
+  await page.route("**/api/dashboard?**", (route) =>
+    route.fulfill({ json: data }),
+  );
+  await page.reload();
+  await expect(page.locator("#intake-kcal")).toHaveText(
+    /2\s987\s*\/ 2\s227kcal/,
+  );
+  await expect(page.locator(".energy-card")).toHaveClass(/is-over-goal/);
+  await expect(page.locator("#energy-caption")).toHaveText(
+    "760 kcal au-dessus de ton objectif.",
+  );
+  await expect(page.locator("#energy-pct")).toHaveText("134%");
+  await expect(page.locator("#energy-progress")).toHaveCSS(
+    "stroke",
+    "rgb(255, 170, 163)",
+  );
+  await expect(page.locator("#intake-kcal")).toHaveCSS(
+    "color",
+    "rgb(255, 170, 163)",
+  );
+  await expect(page.locator("#deficit-value")).toHaveText(/\+560 kcal/);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 1,
+    ),
+  ).toBe(false);
+  await page.screenshot({
+    path: info.outputPath("calorie-target.png"),
+    fullPage: true,
+  });
+  data.intake.kcal = 2000;
+  await page.locator("#previous-day").click();
+  await expect(page.locator(".energy-card")).not.toHaveClass(/is-over-goal/);
+  await expect(page.locator("#energy-caption")).toHaveText(
+    "227 kcal jusqu’à ton objectif.",
+  );
+  await expect(page.locator("#energy-progress")).not.toHaveCSS(
+    "stroke",
+    "rgb(255, 170, 163)",
+  );
+  data.intake.kcal = 2227;
+  await page.locator("#next-day").click();
+  await expect(page.locator("#energy-caption")).toHaveText("Objectif atteint.");
+  await expect(page.locator(".energy-card")).not.toHaveClass(/is-over-goal/);
+  data.intake.kcal = null;
+  await page.locator("#previous-day").click();
+  await expect(page.locator("#intake-kcal")).toHaveText(/—\s*\/ 2\s227kcal/);
+  await expect(page.locator(".energy-card")).not.toHaveClass(/is-over-goal/);
+  await expect(page.locator("#energy-caption")).toContainText("manquantes");
+});
+
 test("dashboard deficit charts preserve gaps, surplus and provisional days", async ({
   page,
 }, info) => {

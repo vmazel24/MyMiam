@@ -390,6 +390,29 @@ p + p {
   color: #9eac94;
   letter-spacing: 0;
 }
+#intake-kcal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+}
+.intake-goal {
+  font-size: 0.43em;
+  white-space: nowrap;
+}
+.energy-main > div {
+  min-width: 0;
+}
+.energy-card.is-over-goal .big-number,
+.energy-card.is-over-goal .hero-caption {
+  color: #ffaaa3;
+}
+.energy-card.is-over-goal .ring-value {
+  stroke: #ffaaa3;
+}
+.energy-card.is-over-goal #energy-pct {
+  fill: #ffaaa3;
+}
 .hero-caption {
   font-size: 11px;
   color: #a8b49f;

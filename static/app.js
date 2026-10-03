@@ -232,8 +232,17 @@ function renderDashboard() {
     goal = s.targets?.kcal;
   const logged = s.has_meals || s.complete;
   const ga = s.garmin;
+  const intake = logged ? s.intake.kcal : null;
+  const overGoal = intake != null && goal != null && intake > goal;
+  document
+    .querySelector(".energy-card")
+    .classList.toggle("is-over-goal", overGoal);
   $("intake-kcal").innerHTML =
-    `${fmt(logged ? s.intake.kcal : null)}<small>kcal</small>`;
+    `<span>${fmt(intake)}</span><span class="intake-goal">/ ${fmt(goal)}<small>kcal</small></span>`;
+  $("intake-kcal").setAttribute(
+    "aria-label",
+    `Calories consommées : ${fmt(intake)} kcal ; objectif : ${fmt(goal)} kcal`,
+  );
   $("expenditure-label").textContent = ga?.has_data
     ? ga.partial
       ? "Garmin · dépensé jusqu’ici"
@@ -261,7 +270,11 @@ function renderDashboard() {
         ? "Aucun repas saisi. Garmin renseigne la dépense, pas les apports."
         : goal == null
           ? "Complète ton profil pour définir ton objectif."
-          : `${fmt(Math.max(0, goal - s.intake.kcal))} kcal jusqu’à ton objectif${s.intake.kcal > goal ? " · objectif dépassé" : ""}.`;
+          : overGoal
+            ? `${fmt(s.intake.kcal - goal, s.intake.kcal - goal < 1 ? 2 : 0)} kcal au-dessus de ton objectif.`
+            : s.intake.kcal === goal
+              ? "Objectif atteint."
+              : `${fmt(goal - s.intake.kcal)} kcal jusqu’à ton objectif.`;
   $("day-state").textContent = s.projected
     ? "Journée en cours"
     : s.complete
