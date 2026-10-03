@@ -336,6 +336,49 @@ function renderDashboard() {
     "stroke-dasharray",
     `${pct == null || s.intake.kcal == null ? 0 : Math.max(0, Math.min(100, pct))} 100`,
   );
+  const hasEnergyParts =
+    ga?.has_data &&
+    Number.isFinite(ga.total) &&
+    ga.total > 0 &&
+    Number.isFinite(ga.active) &&
+    ga.active >= 0 &&
+    ga.active <= ga.total;
+  $("energy-track").setAttribute("r", hasEnergyParts ? 48 : 59);
+  $("energy-progress").setAttribute("r", hasEnergyParts ? 48 : 59);
+  $("energy-source-legend").hidden = !hasEnergyParts;
+  $("energy-base-ring").toggleAttribute(
+    "hidden",
+    !hasEnergyParts || ga.active === ga.total,
+  );
+  $("energy-active-ring").toggleAttribute(
+    "hidden",
+    !hasEnergyParts || ga.active === 0,
+  );
+  const ring = document.querySelector(".energy-ring");
+  ring.classList.toggle("has-energy-parts", Boolean(hasEnergyParts));
+  if (hasEnergyParts) {
+    const base = ga.total - ga.active,
+      basePct = (100 * base) / ga.total,
+      activePct = 100 - basePct;
+    $("energy-base-ring").setAttribute(
+      "stroke-dasharray",
+      `${basePct} ${100 - basePct}`,
+    );
+    $("energy-active-ring").setAttribute(
+      "stroke-dasharray",
+      `${activePct} ${100 - activePct}`,
+    );
+    $("energy-active-ring").setAttribute("stroke-dashoffset", -basePct);
+    $("energy-source-legend").innerHTML =
+      `<span class="ring-legend-caption">Cercle extérieur · dépense Garmin</span><span class="ring-legend-base"><i aria-hidden="true"></i>Base ${fmt(base)} kcal</span><span class="ring-legend-active"><i aria-hidden="true"></i>Actives ${fmt(ga.active)} kcal</span>`;
+    ring.setAttribute(
+      "aria-label",
+      `Cercle extérieur, dépense Garmin : base ${fmt(base)} kcal, actives ${fmt(ga.active)} kcal. Cercle intérieur : ${pct == null || intake == null ? "aucun apport calculable" : `${pct} % de l’objectif consommé`}.`,
+    );
+  } else {
+    $("energy-source-legend").textContent = "";
+    ring.setAttribute("aria-label", "Progression de l’objectif calorique");
+  }
   $("energy-caption").textContent =
     s.intake.kcal == null
       ? "Certaines valeurs alimentaires sont manquantes."

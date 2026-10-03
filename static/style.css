@@ -469,6 +469,51 @@ p + p {
   transform-origin: 70px 70px;
   transition: stroke-dasharray 0.5s;
 }
+.energy-ring .ring-base,
+.energy-ring .ring-active {
+  stroke-width: 6;
+  stroke-linecap: butt;
+  transform: rotate(-90deg);
+  transform-origin: 70px 70px;
+  transition:
+    stroke-dasharray 0.5s,
+    stroke-dashoffset 0.5s;
+}
+.ring-base {
+  stroke: var(--primary);
+}
+.ring-active {
+  stroke: #73d6cc;
+}
+.energy-ring.has-energy-parts .ring-track,
+.energy-ring.has-energy-parts .ring-value {
+  stroke-width: 6;
+}
+.energy-source-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: -4px 0 18px;
+  font-size: 10px;
+  color: #d7dfcf;
+}
+.ring-legend-caption {
+  flex-basis: 100%;
+  color: #a8b49f;
+}
+.energy-source-legend i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.ring-legend-base i {
+  background: var(--primary);
+}
+.ring-legend-active i {
+  background: #73d6cc;
+}
 .energy-ring text {
   fill: #f4f8ea;
   font: 900 30px var(--display);

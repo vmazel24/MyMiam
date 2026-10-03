@@ -170,7 +170,31 @@
                   role="img"
                   aria-label="Progression de l’objectif calorique"
                 >
-                  <circle class="ring-track" cx="70" cy="70" r="59"></circle>
+                  <circle
+                    id="energy-base-ring"
+                    class="ring-base"
+                    cx="70"
+                    cy="70"
+                    r="59"
+                    pathLength="100"
+                    hidden
+                  ></circle>
+                  <circle
+                    id="energy-active-ring"
+                    class="ring-active"
+                    cx="70"
+                    cy="70"
+                    r="59"
+                    pathLength="100"
+                    hidden
+                  ></circle>
+                  <circle
+                    id="energy-track"
+                    class="ring-track"
+                    cx="70"
+                    cy="70"
+                    r="59"
+                  ></circle>
                   <circle
                     id="energy-progress"
                     class="ring-value"
@@ -184,6 +208,11 @@
                   <text x="70" y="86" class="ring-label">de l’objectif</text>
                 </svg>
               </div>
+              <div
+                id="energy-source-legend"
+                class="energy-source-legend"
+                hidden
+              ></div>
               <div class="energy-footer">
                 <div>
                   <span id="expenditure-label">Dépense estimée sur 24 h</span

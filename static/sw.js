@@ -1,4 +1,4 @@
-const CACHE = "mymiam-shell-v21";
+const CACHE = "mymiam-shell-v22";
 const SHELL = [
   "/",
   "/static/style.css",

@@ -865,6 +865,15 @@ test("Garmin expenditure is distinct from unlogged food calories", async ({
     "automatique chaque heure",
   );
   await expect(page.locator("#energy-pct")).toHaveText("—");
+  await expect(page.locator("#energy-source-legend")).toBeVisible();
+  await expect(page.locator("#energy-source-legend")).toContainText(
+    /Base 1\s900 kcal/,
+  );
+  await expect(page.locator("#energy-source-legend")).toContainText(
+    "Actives 800 kcal",
+  );
+  await expect(page.locator("#energy-base-ring")).toBeVisible();
+  await expect(page.locator("#energy-active-ring")).toBeVisible();
 });
 
 test("daily consumption shows its actual target and an overshoot in red", async ({
@@ -1201,6 +1210,14 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
     "100 kcal au-dessus de ton objectif.",
   );
   await expect(page.locator(".energy-card")).toHaveClass(/is-over-goal/);
+  await expect(page.locator("#energy-active-ring")).toHaveCSS(
+    "stroke",
+    "rgb(115, 214, 204)",
+  );
+  await expect(page.locator("#energy-base-ring")).not.toHaveCSS(
+    "stroke",
+    "rgb(255, 170, 163)",
+  );
   active = 600;
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange")),
@@ -1214,6 +1231,37 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
     "Déficit cible : 200 kcal",
   );
   await expect(page.locator("#energy-pct")).toHaveText("85%");
+  await expect(page.locator("#energy-source-legend")).toContainText(
+    /Base 2\s300 kcal/,
+  );
+  await expect(page.locator("#energy-source-legend")).toContainText(
+    "Actives 600 kcal",
+  );
+  const parts = await page.evaluate(() => {
+    const base = parseFloat(
+      document
+        .getElementById("energy-base-ring")
+        .getAttribute("stroke-dasharray"),
+    );
+    const active = parseFloat(
+      document
+        .getElementById("energy-active-ring")
+        .getAttribute("stroke-dasharray"),
+    );
+    return {
+      base,
+      active,
+      offset: Number(
+        document
+          .getElementById("energy-active-ring")
+          .getAttribute("stroke-dashoffset"),
+      ),
+    };
+  });
+  expect(parts.base + parts.active).toBeCloseTo(100);
+  expect(parts.active).toBeCloseTo((100 * 600) / 2900);
+  expect(parts.offset).toBeCloseTo(-parts.base);
+  await expect(page.locator("#energy-progress")).toHaveAttribute("r", "48");
   await expect(page.locator("#energy-caption")).toHaveText(
     "400 kcal jusqu’à ton objectif.",
   );
