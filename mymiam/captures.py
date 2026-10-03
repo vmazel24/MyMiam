@@ -52,7 +52,7 @@ def prepare_draft(store, draft, context=None):
         reference = matches[0].get('reference', {})
         if reference.get('kind') == 'published_product' and reference.get('weight_basis') == 'dry':
             # Describe published facts without claiming the user weighed a pouch.
-            item['note'] = 'Valeurs du fabricant calculées sur le poids sec.'
+            item['note'] = 'Valeurs de la fiche produit calculées sur le poids sec.'
             if reference.get('portion_grams'):
                 item['note'] += f" Format trouvé : sachet de {reference['portion_grams']:g} g."
             if item['estimated']:

@@ -247,7 +247,10 @@ test("journal shows estimated recipe composition and its source link", async ({
   await expect(page.locator("#meal-items .food-nutrients")).toContainText(
     "130 kcal",
   );
-  await page.getByLabel("Poids approximatif", { exact: true }).uncheck();
+  await expect(page.locator(".food-estimated")).toHaveCount(0);
+  await expect(
+    page.getByLabel("Poids approximatif", { exact: true }),
+  ).toHaveCount(0);
   await expect(page.locator("#meal-items .food-nutrients")).toContainText(
     "130 kcal",
   );

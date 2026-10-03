@@ -40,7 +40,8 @@ def public_source(url):
         address = None
     if address is not None and not address.is_global:
         raise ValueError('Source privée interdite')
-    # Sources are links returned by hosted web search, never URLs fetched locally.
+    # Source provenance comes from hosted web search. Fetching additionally checks
+    # DNS addresses and pins a public IP, including for every redirect.
     return url
 
 
@@ -68,7 +69,7 @@ def remember(store, query, name, nutrients, reference, food_id=None, flags=None,
     food_id = food_id or 'reference:' + hashlib.sha256(key.encode()).hexdigest()[:24]
     reference = dict(reference, saved_at=datetime.now(timezone.utc).isoformat())
     source = {'recipe': 'Recette estimée · catalogue personnel',
-              'published_product': 'Fiche nutritionnelle du fabricant'}.get(reference['kind'], 'Open Food Facts · ODbL')
+              'published_product': 'Fiche nutritionnelle du produit'}.get(reference['kind'], 'Open Food Facts · ODbL')
     with store.connect() as db:
         # Never silently change an existing reference's composition.
         db.execute('''INSERT INTO foods VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET

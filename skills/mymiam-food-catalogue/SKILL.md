@@ -35,10 +35,12 @@ vérification obligatoire avant toute substitution générique. Après cette vé
   Il renvoie une identité, les ingrédients publiés, la source et les incertitudes.
   Les fiches Open Food Facts vérifiées et importables sont mémorisées automatiquement :
   utiliser alors `food.food_id` et les données importées, sans réinventer leurs valeurs.
-  Le serveur importe aussi les tableaux des fiches Decathlon vérifiées, même sans
-  code-barres. Quand `food` est fourni, l'utiliser en priorité sur Ciqual, avec la
-  portion et la base sec/préparé publiées dans `reference`. Pour les autres fabricants,
-  l'import de tableau peut rester indisponible : l'outil l'indique explicitement.
+  Le serveur lit les tableaux, blocs nutritionnels et données structurées des fiches
+  produit publiques vérifiées, quelle que soit la marque, même sans code-barres.
+  Privilégier une fiche fabricant ou distributeur du produit plutôt qu'un article
+  général ou une comparaison. Quand `food` est fourni, l'utiliser en priorité sur
+  Ciqual, avec la portion et la base sec/préparé publiées dans `reference`. Si la
+  fiche est inaccessible, ambiguë ou dans un format inexploitable, l'outil l'indique.
   `candidate_food` est le produit réellement trouvé avec ses valeurs publiées,
   sans affirmer qu'il correspond exactement à la demande. Si son état (sec/cuit),
   sa recette et les qualificatifs demandés conviennent, l'utiliser comme meilleure

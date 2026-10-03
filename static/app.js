@@ -409,6 +409,7 @@ function editableItem(item) {
     food_id: item.food_id || null,
     grams: item.grams ?? "",
     estimated: !!item.estimated,
+    composition_estimated: !!item.composition_estimated,
     note: item.note || "",
     food: item.name
       ? {
@@ -483,7 +484,7 @@ function renderDraft() {
   $("meal-items").innerHTML = state.draft
     .map(
       (item, index) =>
-        `<div class="review-row" data-index="${index}"><div class="review-grid"><label>Aliment à vérifier<input class="food-query" value="${escapeHTML(item.label || item.food?.name || "")}" placeholder="Chercher dans Ciqual…" autocomplete="off"></label><label>Poids (g)<input class="food-grams" type="number" min="0.1" max="10000" step="0.1" value="${escapeHTML(item.grams)}" required></label><button type="button" class="remove-food" aria-label="Retirer l’aliment">×</button></div><div class="food-results">${item.matches.length && !item.food ? matchButtons(item.matches) : ""}</div><p class="review-source">${item.food ? escapeHTML(item.food.source) + " · correspondance sélectionnée" : "Choisis une correspondance alimentaire."}</p>${item.note ? `<p class="review-note">${escapeHTML(item.note)}</p>` : ""}<label class="check-label"><input class="food-estimated" type="checkbox" ${item.estimated ? "checked" : ""}> Poids approximatif</label><p class="muted footnote">Coche si le poids est supposé ; décoche si tu l’as pesé ou lu sur l’emballage. Cela ne change pas les calories.</p><div class="item-nutrients"></div></div>`,
+        `<div class="review-row" data-index="${index}"><div class="review-grid"><label>Aliment à vérifier<input class="food-query" value="${escapeHTML(item.label || item.food?.name || "")}" placeholder="Chercher dans Ciqual…" autocomplete="off"></label><label>Poids (g)<input class="food-grams" type="number" min="0.1" max="10000" step="0.1" value="${escapeHTML(item.grams)}" required></label><button type="button" class="remove-food" aria-label="Retirer l’aliment">×</button></div><div class="food-results">${item.matches.length && !item.food ? matchButtons(item.matches) : ""}</div><p class="review-source">${item.food ? escapeHTML(item.food.source) + " · correspondance sélectionnée" : "Choisis une correspondance alimentaire."}</p>${item.note ? `<p class="review-note">${escapeHTML(item.note)}</p>` : ""}<div class="item-nutrients"></div></div>`,
     )
     .join("");
   updatePreview();
@@ -555,6 +556,7 @@ function draftPayload() {
       label: i.label,
       grams: Number(i.grams),
       estimated: i.estimated,
+      composition_estimated: i.composition_estimated,
       note: i.note,
     })),
   };
@@ -1061,10 +1063,12 @@ $("meal-items").addEventListener("input", (event) => {
   $("review-confirm").checked = false;
   if (event.target.matches(".food-grams")) {
     item.grams = event.target.value;
+    item.estimated = false;
+    item.note = "Quantité modifiée manuellement.";
+    const note = row.querySelector(".review-note");
+    if (note) note.textContent = item.note;
     updatePreview();
   }
-  if (event.target.matches(".food-estimated"))
-    item.estimated = event.target.checked;
   if (event.target.matches(".food-query")) {
     item.label = event.target.value;
     item.food = null;

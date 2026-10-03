@@ -28,6 +28,8 @@ Ne jamais poser de question ouverte, demander un poids ou attendre une validatio
   `portion_grams` pour une unité. Ne pas appliquer la composition d'un plat cuit
   à la masse d'un sachet sec. Si une approximation préparée est nécessaire,
   estimer le poids du plat préparé et expliquer simplement l'hypothèse.
+  Si `weight_basis=prepared`, utiliser le poids réhydraté/préparé, jamais la
+  masse sèche du sachet pour ces valeurs.
 - Les notes expliquent une supposition utile (poids, recette moyenne, variante).
   Éviter le jargon technique « fiche Ciqual », « produit vérifié pas exactement… ».
 - Pour un repas prêt à manger, supposer les aliments cuits. Riz et pâtes sans
