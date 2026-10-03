@@ -965,6 +965,13 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
     await daily.evaluateAll((els) => els.map((e) => Number(e.dataset.value))),
   ).toEqual([300, -100, 0]);
   await expect(page.locator("#daily-deficit-chart .surplus")).toHaveCount(1);
+  const zeroY = Number(
+    await page.locator("#daily-deficit-chart .zero-line").getAttribute("y1"),
+  );
+  expect(Number(await daily.first().getAttribute("y"))).toBeLessThan(zeroY);
+  expect(Number(await daily.nth(1).getAttribute("y"))).toBe(zeroY);
+  await expect(daily.first()).toHaveCSS("fill", "rgb(91, 150, 47)");
+  await expect(daily.nth(1)).toHaveCSS("fill", "rgb(193, 91, 77)");
   const cumulative = page.locator("#cumulative-deficit-chart .deficit-point");
   expect(
     await cumulative.evaluateAll((els) =>
@@ -1079,7 +1086,7 @@ test("fat equivalents are the default across balances charts and trends and the 
     page.locator("#daily-deficit-chart .deficit-bar title").first(),
   ).toHaveText(/Déficit : ≈ 0,1 kg/);
   await expect(page.locator("#daily-deficit-chart .surplus title")).toHaveText(
-    /Surplus : ≈ 0,05 kg/,
+    /Surplus : ≈ -0,05 kg/,
   );
   await expect(
     page.locator("#cumulative-deficit-chart .deficit-point title").last(),
@@ -1220,4 +1227,66 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
     path: info.outputPath("active-calorie-target.png"),
     fullPage: true,
   });
+});
+
+test("cumulative deficit changes color at zero and keeps gaps in both units", async ({
+  page,
+}) => {
+  const deficits = [300, -600, 400, null, -200, 400];
+  const days = deficits.map((deficit, i) => {
+    const day = new Date();
+    day.setDate(day.getDate() - deficits.length + i);
+    return {
+      day: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
+      deficit,
+    };
+  });
+  await page.route("**/api/trends?**", (route) =>
+    route.fulfill({
+      json: {
+        days,
+        cumulative_deficit: 300,
+        covered_days: 5,
+        elapsed_days: 6,
+        weights: [],
+      },
+    }),
+  );
+  await page.locator("#dashboard-period").selectOption("7");
+  const chart = page.locator("#cumulative-deficit-chart");
+  await expect(chart.locator(".deficit-line")).toHaveCount(5);
+  await expect(chart.locator(".deficit-line.surplus")).toHaveCount(2);
+  await expect(chart.locator(".deficit-point.surplus")).toHaveCount(2);
+  const unit = page.getByRole("combobox", { name: "Unité des bilans" });
+  for (const name of ["fat", "kcal"]) {
+    await unit.selectOption(name);
+    const zeroY = Number(await chart.locator(".zero-line").getAttribute("y1"));
+    for (const line of await chart.locator(".deficit-line").all()) {
+      const red = await line.evaluate((el) => el.classList.contains("surplus"));
+      const coordinates = (await line.getAttribute("points"))
+        .split(" ")
+        .map((pair) => pair.split(",").map(Number));
+      for (const [, y] of coordinates) {
+        if (red) expect(y).toBeGreaterThanOrEqual(zeroY - 0.001);
+        else expect(y).toBeLessThanOrEqual(zeroY + 0.001);
+      }
+      await expect(line).toHaveCSS(
+        "stroke",
+        red ? "rgb(193, 91, 77)" : "rgb(91, 150, 47)",
+      );
+    }
+    const gapX = Number(
+      await page
+        .locator("#daily-deficit-chart .deficit-bar")
+        .nth(3)
+        .getAttribute("x"),
+    );
+    // The cumulative lines stop before the unlogged day and resume afterwards.
+    for (const line of await chart.locator(".deficit-line").all()) {
+      const xs = (await line.getAttribute("points"))
+        .split(" ")
+        .map((pair) => Number(pair.split(",")[0]));
+      expect(Math.min(...xs) < gapX && Math.max(...xs) > gapX).toBe(false);
+    }
+  }
 });

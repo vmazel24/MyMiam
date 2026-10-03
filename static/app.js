@@ -955,13 +955,45 @@ function deficitChart(days, cumulative) {
   let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${cumulative ? "Déficit cumulé" : "Déficit et surplus par jour"} · ${balanceUnitLabel()}">`;
   for (let i = 0; i < 3; i++) {
     const value = high - ((high - low) * i) / 2;
-    svg += `<line class="grid-line" x1="${left}" x2="${width - right}" y1="${y(value)}" y2="${y(value)}"/><text x="0" y="${y(value) + 4}">${balanceNumber(value)}</text>`;
+    svg += `<line class="grid-line" x1="${left}" x2="${width - right}" y1="${y(value)}" y2="${y(value)}"/><text x="0" y="${y(value) + 4}">${value > 0 ? "+" : ""}${balanceNumber(value)}</text>`;
   }
   svg += `<line class="zero-line" x1="${left}" x2="${width - right}" y1="${y(0)}" y2="${y(0)}"/>`;
   let segment = [];
   function flush() {
-    if (segment.length > 1)
-      svg += `<polyline class="deficit-line" points="${segment.join(" ")}"/>`;
+    if (segment.length > 1) {
+      let part = [segment[0]],
+        surplus = segment[0].value < 0;
+      function draw() {
+        if (part.length > 1)
+          svg += `<polyline class="deficit-line${surplus ? " surplus" : ""}" points="${part.map((p) => `${p.x},${y(p.value)}`).join(" ")}"/>`;
+      }
+      for (const point of segment.slice(1)) {
+        const previous = part[part.length - 1];
+        if (previous.value * point.value < 0) {
+          const ratio = previous.value / (previous.value - point.value);
+          const crossing = {
+            x: previous.x + (point.x - previous.x) * ratio,
+            value: 0,
+          };
+          part.push(crossing);
+          draw();
+          part = [crossing, point];
+          surplus = point.value < 0;
+        } else {
+          if (
+            previous.value === 0 &&
+            point.value !== 0 &&
+            surplus !== point.value < 0
+          ) {
+            draw();
+            part = [previous];
+            surplus = point.value < 0;
+          }
+          part.push(point);
+        }
+      }
+      draw();
+    }
     segment = [];
   }
   values.forEach((value, i) => {
@@ -969,9 +1001,9 @@ function deficitChart(days, cumulative) {
       flush();
       return;
     }
-    const title = `${days[i].day} · ${cumulative ? "Cumul" : value >= 0 ? "Déficit" : "Surplus"} : ${balanceValue(cumulative ? value : Math.abs(value))}`;
+    const title = `${days[i].day} · ${cumulative ? "Cumul" : value >= 0 ? "Déficit" : "Surplus"} : ${balanceValue(value)}`;
     if (cumulative) {
-      segment.push(`${x(i)},${y(value)}`);
+      segment.push({ x: x(i), value });
       svg += `<circle class="deficit-point ${value < 0 ? "surplus" : ""}" data-day="${days[i].day}" data-value="${value}" cx="${x(i)}" cy="${y(value)}" r="3.5"><title>${escapeHTML(title)}</title></circle>`;
     } else {
       const barWidth = Math.max(1, Math.min(18, step * 0.62));

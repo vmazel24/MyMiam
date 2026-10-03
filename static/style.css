@@ -1025,15 +1025,28 @@ form > .ghost-button {
 }
 .chart .deficit-bar,
 .chart .deficit-point {
-  fill: #87ad52;
+  fill: #5b962f;
 }
 .chart .surplus {
-  fill: #c78368;
+  fill: #c15b4d;
 }
 .chart .deficit-line {
   fill: none;
-  stroke: #779d47;
+  stroke: #5b962f;
   stroke-width: 2.5;
+}
+.chart .deficit-line.surplus {
+  stroke: #c15b4d;
+}
+.deficit-legend {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.deficit-dot {
+  background: #5b962f;
+}
+.surplus-dot {
+  background: #c15b4d;
 }
 .legend {
   display: flex;
