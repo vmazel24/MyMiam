@@ -209,7 +209,12 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
   Un seul repas suffit pour la réintégrer automatiquement. Les paramètres du profil sont
   conservés lors de la saisie pour stabiliser les objectifs historiques ; les
   objectifs d'aujourd'hui restent modifiables avec le profil.
-- Le Dashboard affiche le déficit journalier et son cumul sur 7, 30 ou 90 jours.
+- Le Dashboard affiche le bilan énergétique journalier et son cumul sur 7, 30 ou 90 jours.
+  Les montants sont affichés sans signe, accompagnés d'un tag « En déficit »,
+  « En surplus » ou « À l'équilibre », dans les cartes et le tableau.
+  Le calcul conserve son signe en interne : les déficits montent en vert et
+  les surplus descendent en rouge sur les graphiques, dont les axes et
+  infobulles indiquent des montants sans signe.
   Les journées manquantes interrompent les graphiques ; aujourd'hui est exclu
   des bilans définitifs. Sans repas saisi, les
   apports restent affichés inconnus. Le total Garmin observé est présenté

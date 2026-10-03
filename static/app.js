@@ -69,14 +69,21 @@ function balanceUnitLabel() {
 }
 function balanceValue(kcal, perDay = false) {
   if (kcal == null) return "—";
-  return `${state.balanceUnit === "fat" ? "≈ " : ""}${balanceNumber(kcal)} ${state.balanceUnit === "fat" ? "kg" : "kcal"}${perDay ? " / jour" : ""}`;
+  return `${state.balanceUnit === "fat" ? "≈ " : ""}${balanceNumber(Math.abs(kcal))} ${state.balanceUnit === "fat" ? "kg" : "kcal"}${perDay ? " / jour" : ""}`;
+}
+function balanceStatus(kcal) {
+  return kcal > 0 ? "En déficit" : kcal < 0 ? "En surplus" : "À l’équilibre";
+}
+function balanceTag(kcal, provisional = false) {
+  if (kcal == null) return "";
+  const kind = kcal > 0 ? "deficit" : kcal < 0 ? "surplus" : "even";
+  return `<span class="balance-tag balance-${kind}">${balanceStatus(kcal)}${provisional ? " · provisoire" : ""}</span>`;
 }
 function syncBalanceUnit() {
   $("balance-unit").value = state.balanceUnit;
   $("balance-controls").hidden = !["today", "trends"].includes(state.view);
-  $("balance-label").textContent =
-    state.balanceUnit === "fat" ? "Bilan · équiv. gras" : "Bilan calorique";
-  $("trend-balance-heading").textContent = `Déficit · ${balanceUnitLabel()}`;
+  $("balance-label").textContent = "Bilan énergétique";
+  $("trend-balance-heading").textContent = `Bilan · ${balanceUnitLabel()}`;
   document.querySelectorAll("[data-balance-unit]").forEach((el) => {
     el.textContent = balanceUnitLabel();
   });
@@ -300,11 +307,9 @@ function renderDashboard() {
   $("target-deficit").textContent =
     s.target_deficit == null
       ? ""
-      : `Déficit cible : ${s.target_deficit > 0 ? "−" : ""}${fmt(s.target_deficit)} kcal`;
-  $("deficit-value").textContent =
-    s.deficit == null
-      ? "—"
-      : `${state.balanceUnit === "fat" ? "≈ " : ""}${s.deficit === 0 ? "" : s.deficit > 0 ? "−" : "+"}${balanceNumber(Math.abs(s.deficit))} ${state.balanceUnit === "fat" ? "kg" : "kcal"}`;
+      : `Déficit cible : ${fmt(s.target_deficit)} kcal`;
+  $("deficit-value").textContent = balanceValue(s.deficit);
+  $("balance-status").innerHTML = balanceTag(s.deficit, s.projected);
   const pct = goal && logged ? Math.round((s.intake.kcal / goal) * 100) : null;
   $("energy-pct").textContent =
     pct == null || s.intake.kcal == null ? "—" : pct + "%";
@@ -911,15 +916,16 @@ function renderDashboardHistory() {
     : null;
   $("dashboard-kpis").innerHTML = [
     [
-      "Déficit cumulé",
+      "Bilan cumulé",
       data.covered_days ? balanceValue(data.cumulative_deficit) : "—",
+      data.covered_days ? data.cumulative_deficit : null,
     ],
-    ["Déficit moyen", balanceValue(mean, true)],
+    ["Bilan moyen", balanceValue(mean, true), mean],
     ["Jours exploitables", `${data.covered_days} / ${data.elapsed_days}`],
   ]
     .map(
-      ([label, value]) =>
-        `<div><span>${label}</span><strong>${value}</strong></div>`,
+      ([label, value, balance]) =>
+        `<div><span>${label}</span><strong>${value}</strong>${balanceTag(balance)}</div>`,
     )
     .join("");
   $("daily-deficit-chart").innerHTML = deficitChart(data.days, false);
@@ -952,10 +958,10 @@ function deficitChart(days, cumulative) {
   const y = (v) => top + ((high - v) / (high - low)) * plotHeight;
   const step = plotWidth / days.length,
     x = (i) => left + (i + 0.5) * step;
-  let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${cumulative ? "Déficit cumulé" : "Déficit et surplus par jour"} · ${balanceUnitLabel()}">`;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${cumulative ? "Bilan énergétique cumulé" : "Bilan énergétique par jour"} · ${balanceUnitLabel()} · déficit vers le haut, surplus vers le bas">`;
   for (let i = 0; i < 3; i++) {
     const value = high - ((high - low) * i) / 2;
-    svg += `<line class="grid-line" x1="${left}" x2="${width - right}" y1="${y(value)}" y2="${y(value)}"/><text x="0" y="${y(value) + 4}">${value > 0 ? "+" : ""}${balanceNumber(value)}</text>`;
+    svg += `<line class="grid-line" x1="${left}" x2="${width - right}" y1="${y(value)}" y2="${y(value)}"/><text class="balance-axis-${value > 0 ? "deficit" : value < 0 ? "surplus" : "even"}" aria-label="${balanceStatus(value)} : ${balanceNumber(Math.abs(value))}" x="0" y="${y(value) + 4}">${balanceNumber(Math.abs(value))}</text>`;
   }
   svg += `<line class="zero-line" x1="${left}" x2="${width - right}" y1="${y(0)}" y2="${y(0)}"/>`;
   let segment = [];
@@ -1001,7 +1007,7 @@ function deficitChart(days, cumulative) {
       flush();
       return;
     }
-    const title = `${days[i].day} · ${cumulative ? "Cumul" : value >= 0 ? "Déficit" : "Surplus"} : ${balanceValue(value)}`;
+    const title = `${days[i].day} · ${cumulative ? "Bilan cumulé" : "Bilan"} : ${balanceValue(value)} · ${balanceStatus(value)}`;
     if (cumulative) {
       segment.push({ x: x(i), value });
       svg += `<circle class="deficit-point ${value < 0 ? "surplus" : ""}" data-day="${days[i].day}" data-value="${value}" cx="${x(i)}" cy="${y(value)}" r="3.5"><title>${escapeHTML(title)}</title></circle>`;
@@ -1048,14 +1054,15 @@ function renderTrends() {
     : null;
   $("trend-kpis").innerHTML = [
     [
-      "Déficit cumulé",
+      "Bilan cumulé",
       data.covered_days
-        ? `${state.balanceUnit === "fat" ? "≈ " : ""}${balanceNumber(data.cumulative_deficit)}`
+        ? `${state.balanceUnit === "fat" ? "≈ " : ""}${balanceNumber(Math.abs(data.cumulative_deficit))}`
         : "—",
       balanceUnitLabel(),
       data.covered_days
-        ? "Les surplus réduisent ce cumul."
+        ? "Écart net sur la période, après compensation des déficits et des surplus."
         : "Aucune journée passée renseignée.",
+      data.covered_days ? data.cumulative_deficit : null,
     ],
     [
       "Couverture du suivi",
@@ -1071,8 +1078,8 @@ function renderTrends() {
     ],
   ]
     .map(
-      ([title, value, unit, note]) =>
-        `<article class="macro-card"><div class="macro-top">${title}</div><div class="macro-number">${value} <small>${unit}</small></div><p class="footnote">${note}</p></article>`,
+      ([title, value, unit, note, balance]) =>
+        `<article class="macro-card"><div class="macro-top">${title}</div><div class="macro-number">${value} <small>${unit}</small></div>${balanceTag(balance)}<p class="footnote">${note}</p></article>`,
     )
     .join("");
   renderEnergyChart(data.days);
@@ -1081,7 +1088,7 @@ function renderTrends() {
     .reverse()
     .map(
       (d) =>
-        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? balanceValue(d.deficit) : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.projected ? "Provisoire" : d.complete ? "Actualisé" : "Non saisie"}</span></td></tr>`,
+        `<tr><td>${escapeHTML(new Date(d.day + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }))}</td><td>${d.has_meals || d.complete ? fmt(d.intake.kcal) : "—"} kcal</td><td>${fmt(d.expenditure)} kcal</td><td>${d.day < today() ? `${balanceValue(d.deficit)} ${balanceTag(d.deficit)}` : "Provisoire"}</td><td><span class="pill ${d.complete ? "" : "incomplete"}">${d.projected ? "Provisoire" : d.complete ? "Actualisé" : "Non saisie"}</span></td></tr>`,
     )
     .join("");
 }

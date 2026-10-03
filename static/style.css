@@ -1038,6 +1038,12 @@ form > .ghost-button {
 .chart .deficit-line.surplus {
   stroke: #c15b4d;
 }
+.chart text.balance-axis-deficit {
+  fill: #5b962f;
+}
+.chart text.balance-axis-surplus {
+  fill: #c15b4d;
+}
 .deficit-legend {
   margin-top: 12px;
   flex-wrap: wrap;
@@ -1097,6 +1103,36 @@ td {
 .pill.incomplete {
   background: #f0f0ec;
   color: #888c82;
+}
+span.balance-tag {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5c6659;
+  background: #f0f0ec;
+}
+span.balance-tag.balance-deficit {
+  color: #365f1b;
+  background: #e7f2dc;
+}
+span.balance-tag.balance-surplus {
+  color: #922f25;
+  background: #fde8e2;
+}
+.energy-footer span.balance-tag {
+  color: #d1d5cb;
+  background: #ffffff12;
+}
+.energy-footer span.balance-deficit {
+  color: #d7edb6;
+  background: #b9e27a1f;
+}
+.energy-footer span.balance-surplus {
+  color: #ffc0b8;
+  background: #ffaaa31f;
 }
 footer {
   margin-top: 50px;
@@ -1673,7 +1709,7 @@ dialog::backdrop {
   padding-left: 12px;
   border-left: 3px solid #c9dcae;
 }
-.dashboard-kpis span {
+.dashboard-kpis span:not(.balance-tag) {
   display: block;
   color: var(--muted);
   font-size: 11px;
@@ -1728,7 +1764,7 @@ dialog::backdrop {
   .dashboard-kpis > div {
     padding-left: 8px;
   }
-  .dashboard-kpis span {
+  .dashboard-kpis span:not(.balance-tag) {
     font-size: 10px;
   }
   .dashboard-kpis strong {

@@ -903,11 +903,11 @@ test("daily consumption shows its actual target and an overshoot in red", async 
     "color",
     "rgb(255, 170, 163)",
   );
-  await expect(page.locator("#deficit-value")).toHaveText("≈ +0,059 kg");
+  await expect(page.locator("#deficit-value")).toHaveText("≈ 0,059 kg");
   await page
     .getByRole("combobox", { name: "Unité des bilans" })
     .selectOption("kcal");
-  await expect(page.locator("#deficit-value")).toHaveText(/\+560 kcal/);
+  await expect(page.locator("#deficit-value")).toHaveText("560 kcal");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth + 1,
@@ -1074,7 +1074,7 @@ test("fat equivalents are the default across balances charts and trends and the 
   await page.reload();
   const unit = page.getByRole("combobox", { name: "Unité des bilans" });
   await expect(unit).toHaveValue("fat");
-  await expect(page.locator("#deficit-value")).toHaveText("≈ +0,05 kg");
+  await expect(page.locator("#deficit-value")).toHaveText("≈ 0,05 kg");
   await expect(page.locator("#dashboard-kpis")).toContainText("≈ 0,05 kg");
   await expect(page.locator("#dashboard-kpis")).toContainText(
     "≈ 0,025 kg / jour",
@@ -1084,9 +1084,9 @@ test("fat equivalents are the default across balances charts and trends and the 
   );
   await expect(
     page.locator("#daily-deficit-chart .deficit-bar title").first(),
-  ).toHaveText(/Déficit : ≈ 0,1 kg/);
+  ).toHaveText(/Bilan : ≈ 0,1 kg · En déficit/);
   await expect(page.locator("#daily-deficit-chart .surplus title")).toHaveText(
-    /Surplus : ≈ -0,05 kg/,
+    /Bilan : ≈ 0,05 kg · En surplus/,
   );
   await expect(
     page.locator("#cumulative-deficit-chart .deficit-point title").last(),
@@ -1096,11 +1096,11 @@ test("fat equivalents are the default across balances charts and trends and the 
   );
   const readCount = reads;
   await unit.selectOption("kcal");
-  await expect(page.locator("#deficit-value")).toHaveText("+472 kcal");
+  await expect(page.locator("#deficit-value")).toHaveText("472 kcal");
   await expect(page.locator("#dashboard-kpis")).toContainText("472 kcal");
   await expect(
     page.locator("#daily-deficit-chart .deficit-bar title").first(),
-  ).toHaveText(/Déficit : 944 kcal/);
+  ).toHaveText(/Bilan : 944 kcal · En déficit/);
   expect(reads).toBe(readCount);
   await page.locator('.nav-button[data-view="trends"]').click();
   await expect(unit).toHaveValue("kcal");
@@ -1110,7 +1110,7 @@ test("fat equivalents are the default across balances charts and trends and the 
   await expect(page.locator("#trend-kpis")).toContainText(
     "≈ 0,05 kg équiv. gras",
   );
-  await expect(page.locator("#trend-table")).toContainText("≈ -0,05 kg");
+  await expect(page.locator("#trend-table")).toContainText("≈ 0,05 kg");
   await expect(page.locator("#trend-table")).toContainText("Provisoire");
   expect(await page.locator("#trend-chart").innerHTML()).toBe(rawChart);
   await page.reload();
@@ -1124,7 +1124,7 @@ test("fat equivalents are the default across balances charts and trends and the 
   await expect(page.locator("#trend-kpis")).toContainText("472 kcal");
   await unit.selectOption("fat");
   await page.locator('.nav-button[data-view="today"]').click();
-  await expect(page.locator("#deficit-value")).toHaveText("≈ +0,05 kg");
+  await expect(page.locator("#deficit-value")).toHaveText("≈ 0,05 kg");
   await page.locator(".balance-conversion summary").click();
   await expect(page.locator(".balance-conversion")).toContainText("9 440 kcal");
   await expect(page.locator(".balance-conversion a")).toHaveAttribute(
@@ -1204,7 +1204,7 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
   await expect(page.locator("#target-value")).toHaveText(/2\s700 kcal/);
   await expect(page.locator("#target-deficit")).toBeVisible();
   await expect(page.locator("#target-deficit")).toHaveText(
-    "Déficit cible : −200 kcal",
+    "Déficit cible : 200 kcal",
   );
   await expect(page.locator("#energy-pct")).toHaveText("85%");
   await expect(page.locator("#energy-caption")).toHaveText(
@@ -1289,4 +1289,118 @@ test("cumulative deficit changes color at zero and keeps gaps in both units", as
       expect(Math.min(...xs) < gapX && Math.max(...xs) > gapX).toBe(false);
     }
   }
+});
+
+test("energy balances use unsigned amounts and explicit tags for deficit surplus equilibrium and missing days", async ({
+  page,
+}, info) => {
+  let balance = -600;
+  const days = [300, -900, 0, null].map((deficit, i) => {
+    const day = new Date();
+    day.setDate(day.getDate() - 4 + i);
+    return {
+      day: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
+      deficit,
+      expenditure: 2000,
+      intake: { kcal: deficit == null ? 0 : 2000 - deficit },
+      has_meals: deficit != null,
+      complete: deficit != null,
+      projected: false,
+    };
+  });
+  await page.route("**/api/dashboard?**", (route) =>
+    route.fulfill({
+      json: {
+        day: new URL(route.request().url()).searchParams.get("day"),
+        meals: [],
+        has_meals: balance != null,
+        complete: balance != null,
+        intake: {
+          kcal: balance == null ? 0 : 2000 - balance,
+          protein: 80,
+          carbs: 200,
+          fat: 70,
+        },
+        targets: { kcal: 1800, protein: 90, carbs: 203, fat: 70 },
+        expenditure: 2000,
+        resting: 2000,
+        projected: true,
+        garmin: null,
+        deficit: balance,
+        target_deficit: 200,
+      },
+    }),
+  );
+  await page.route("**/api/trends?**", (route) =>
+    route.fulfill({
+      json: {
+        days,
+        cumulative_deficit: -600,
+        covered_days: 3,
+        elapsed_days: 4,
+        weights: [],
+      },
+    }),
+  );
+  await page.reload();
+  const unit = page.getByRole("combobox", { name: "Unité des bilans" });
+  const value = page.locator("#deficit-value");
+  const tag = page.locator("#balance-status .balance-tag");
+  for (const mode of ["fat", "kcal"]) {
+    await unit.selectOption(mode);
+    for (const [amount, label, kind] of [
+      [600, "En déficit", "deficit"],
+      [-600, "En surplus", "surplus"],
+      [0, "À l’équilibre", "even"],
+    ]) {
+      balance = amount;
+      await page.evaluate(() =>
+        document.dispatchEvent(new Event("visibilitychange")),
+      );
+      await expect(tag).toHaveClass(new RegExp(`balance-${kind}`));
+      await expect(tag).toContainText(label);
+      await expect(value).toHaveText(
+        mode === "fat"
+          ? amount === 0
+            ? "≈ 0 kg"
+            : "≈ 0,064 kg"
+          : `${Math.abs(amount)} kcal`,
+      );
+    }
+    balance = null;
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
+    await expect(value).toHaveText("—");
+    await expect(tag).toHaveCount(0);
+    await expect(page.locator("#dashboard-kpis .balance-surplus")).toHaveCount(
+      2,
+    );
+    await expect(page.locator("#dashboard-kpis")).toContainText(
+      mode === "fat" ? "≈ 0,064 kg" : "600 kcal",
+    );
+    await page.locator('.nav-button[data-view="trends"]').click();
+    await expect(page.locator("#trend-kpis .balance-surplus")).toHaveCount(1);
+    await expect(page.locator("#trend-table .balance-deficit")).toHaveCount(1);
+    await expect(page.locator("#trend-table .balance-surplus")).toHaveCount(1);
+    await expect(page.locator("#trend-table .balance-even")).toHaveCount(1);
+    await expect(
+      page.locator("#trend-table tr").first().locator(".balance-tag"),
+    ).toHaveCount(0);
+    await page.locator('.nav-button[data-view="today"]').click();
+  }
+  balance = -600;
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange")),
+  );
+  await expect(tag).toContainText("En surplus");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 1,
+    ),
+  ).toBe(false);
+  await page.screenshot({
+    path: info.outputPath("energy-balance-status.png"),
+    fullPage: true,
+  });
 });
