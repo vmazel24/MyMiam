@@ -210,6 +210,14 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
   séparément de l'objectif calculé sur une journée de 24 heures.
   Le journal est organisé en Matin, Midi et Soir, avec ajout direct dans chaque
   créneau ; les collations sont déduites du texte ou sélectionnables en saisie manuelle.
+- Les bilans, cumuls, moyennes et graphiques de déficit passent entre kcal et
+  kg équivalents de gras, unité proposée par défaut. Le choix est conservé dans
+  le navigateur pour le compte connecté. La conversion utilise **39,5 MJ/kg**,
+  soit `39 500 / 4,184 ≈ 9 440,73 kcal/kg`, d’après
+  [Chow & Hall (2008)](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1000045).
+  C’est un équivalent énergétique estimé, pas une mesure de gras perdu ou gagné.
+  Les valeurs du journal et les calculs restent en kcal ; les jours non saisis
+  et la journée en cours restent exclus des bilans définitifs.
 - Les repas favoris servent aussi de recettes personnelles. Les exports JSON
   contiennent les données du journal et aucun identifiant de connexion.
 

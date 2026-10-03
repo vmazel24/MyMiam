@@ -352,6 +352,36 @@ p + p {
   grid-template-columns: 1.7fr 1fr;
   gap: 22px;
 }
+.balance-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+  margin: 0 0 18px;
+  font-size: 11px;
+}
+.balance-controls label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.balance-controls select {
+  width: auto;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.balance-conversion {
+  max-width: 500px;
+  color: var(--muted);
+}
+.balance-conversion summary {
+  cursor: pointer;
+}
+.balance-conversion p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
 .energy-card {
   background: var(--dark);
   color: #f5f8ee;

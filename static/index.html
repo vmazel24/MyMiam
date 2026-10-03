@@ -113,6 +113,31 @@
           </div>
         </header>
         <div id="global-error" class="notice error" role="alert" hidden></div>
+        <div class="balance-controls" id="balance-controls">
+          <label for="balance-unit"
+            >Bilans en
+            <select id="balance-unit" aria-label="Unité des bilans">
+              <option value="fat" selected>kg de gras (équiv.)</option>
+              <option value="kcal">kcal</option>
+            </select>
+          </label>
+          <details class="balance-conversion">
+            <summary>Comment est-ce calculé ?</summary>
+            <p>
+              Équivalent énergétique estimé : 1 kg de masse grasse ≈ 9 440 kcal
+              (39,5 MJ/kg). Le bilan en kcal est divisé par cette densité. Cet
+              équivalent ne mesure pas le gras perdu ou gagné : le bilan se
+              répartit entre gras et autres tissus, et le poids varie aussi avec
+              l’eau.
+            </p>
+            <a
+              href="https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1000045"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Source : Chow &amp; Hall, 2008</a
+            >
+          </details>
+        </div>
         <section id="view-today" class="view">
           <div class="hero-grid">
             <article class="energy-card">
@@ -160,7 +185,7 @@
                   ><strong id="target-value">—</strong>
                 </div>
                 <div>
-                  <span>Bilan calorique</span
+                  <span id="balance-label">Bilan · équiv. gras</span
                   ><strong id="deficit-value">—</strong>
                 </div>
               </div>
@@ -215,7 +240,7 @@
             <article class="panel">
               <div class="section-head">
                 <h3>Déficit par jour</h3>
-                <span class="pill">kcal</span>
+                <span class="pill" data-balance-unit>kg équiv. gras</span>
               </div>
               <div id="daily-deficit-chart" class="chart"></div>
               <p class="footnote muted">
@@ -225,7 +250,7 @@
             <article class="panel">
               <div class="section-head">
                 <h3>Déficit cumulé</h3>
-                <span class="pill">kcal</span>
+                <span class="pill" data-balance-unit>kg équiv. gras</span>
               </div>
               <div id="cumulative-deficit-chart" class="chart"></div>
               <p class="footnote muted">
@@ -338,7 +363,7 @@
                     <th>Jour</th>
                     <th>Apports</th>
                     <th>Dépense</th>
-                    <th>Déficit</th>
+                    <th id="trend-balance-heading">Déficit · kg équiv. gras</th>
                     <th>Suivi</th>
                   </tr>
                 </thead>

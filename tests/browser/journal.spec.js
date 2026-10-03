@@ -903,6 +903,10 @@ test("daily consumption shows its actual target and an overshoot in red", async 
     "color",
     "rgb(255, 170, 163)",
   );
+  await expect(page.locator("#deficit-value")).toHaveText("≈ +0,059 kg");
+  await page
+    .getByRole("combobox", { name: "Unité des bilans" })
+    .selectOption("kcal");
   await expect(page.locator("#deficit-value")).toHaveText(/\+560 kcal/);
   expect(
     await page.evaluate(
@@ -970,6 +974,10 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
   await expect(
     page.locator("#cumulative-deficit-chart .deficit-line"),
   ).toHaveCount(1);
+  await expect(page.locator("#dashboard-kpis")).toContainText("≈ 0,021 kg");
+  await page
+    .getByRole("combobox", { name: "Unité des bilans" })
+    .selectOption("kcal");
   await expect(page.locator("#dashboard-kpis")).toContainText("200 kcal");
   expect(
     await page.evaluate(
@@ -979,6 +987,150 @@ test("dashboard deficit charts preserve gaps, surplus and provisional days", asy
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({
     path: info.outputPath("dashboard-charts.png"),
+    fullPage: true,
+  });
+});
+
+test("fat equivalents are the default across balances charts and trends and the switch is remembered", async ({
+  page,
+}, info) => {
+  const pastDay = (offset) => {
+    const date = new Date();
+    date.setDate(date.getDate() - offset);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+  const days = [
+    {
+      day: pastDay(3),
+      deficit: 944,
+      has_meals: true,
+      complete: true,
+      intake: { kcal: 1500 },
+      expenditure: 2444,
+    },
+    {
+      day: pastDay(2),
+      deficit: null,
+      has_meals: false,
+      complete: false,
+      intake: { kcal: 0 },
+      expenditure: 2100,
+    },
+    {
+      day: pastDay(1),
+      deficit: -472,
+      has_meals: true,
+      complete: true,
+      intake: { kcal: 2500 },
+      expenditure: 2028,
+    },
+    {
+      day: pastDay(0),
+      deficit: 800,
+      has_meals: true,
+      complete: true,
+      intake: { kcal: 1500 },
+      expenditure: 2300,
+      projected: true,
+    },
+  ];
+  let reads = 0;
+  await page.route("**/api/trends?**", (route) => {
+    reads++;
+    return route.fulfill({
+      json: {
+        days,
+        cumulative_deficit: 472,
+        covered_days: 2,
+        elapsed_days: 3,
+        weights: [],
+      },
+    });
+  });
+  await page.route("**/api/dashboard?**", (route) =>
+    route.fulfill({
+      json: {
+        day: new URL(route.request().url()).searchParams.get("day"),
+        meals: [],
+        has_meals: true,
+        complete: true,
+        intake: { kcal: 2500, protein: 100, carbs: 250, fat: 90 },
+        targets: { kcal: 1800, protein: 100, carbs: 200, fat: 80 },
+        expenditure: 2028,
+        resting: 1800,
+        deficit: -472,
+        projected: false,
+        garmin: null,
+      },
+    }),
+  );
+  await page.reload();
+  const unit = page.getByRole("combobox", { name: "Unité des bilans" });
+  await expect(unit).toHaveValue("fat");
+  await expect(page.locator("#deficit-value")).toHaveText("≈ +0,05 kg");
+  await expect(page.locator("#dashboard-kpis")).toContainText("≈ 0,05 kg");
+  await expect(page.locator("#dashboard-kpis")).toContainText(
+    "≈ 0,025 kg / jour",
+  );
+  await expect(page.locator("#daily-deficit-chart .deficit-bar")).toHaveCount(
+    2,
+  );
+  await expect(
+    page.locator("#daily-deficit-chart .deficit-bar title").first(),
+  ).toHaveText(/Déficit : ≈ 0,1 kg/);
+  await expect(page.locator("#daily-deficit-chart .surplus title")).toHaveText(
+    /Surplus : ≈ 0,05 kg/,
+  );
+  await expect(
+    page.locator("#cumulative-deficit-chart .deficit-point title").last(),
+  ).toHaveText(/≈ 0,05 kg/);
+  await expect(page.locator("[data-balance-unit]").first()).toHaveText(
+    "kg équiv. gras",
+  );
+  const readCount = reads;
+  await unit.selectOption("kcal");
+  await expect(page.locator("#deficit-value")).toHaveText("+472 kcal");
+  await expect(page.locator("#dashboard-kpis")).toContainText("472 kcal");
+  await expect(
+    page.locator("#daily-deficit-chart .deficit-bar title").first(),
+  ).toHaveText(/Déficit : 944 kcal/);
+  expect(reads).toBe(readCount);
+  await page.locator('.nav-button[data-view="trends"]').click();
+  await expect(unit).toHaveValue("kcal");
+  await expect(page.locator("#trend-kpis")).toContainText("472 kcal");
+  const rawChart = await page.locator("#trend-chart").innerHTML();
+  await unit.selectOption("fat");
+  await expect(page.locator("#trend-kpis")).toContainText(
+    "≈ 0,05 kg équiv. gras",
+  );
+  await expect(page.locator("#trend-table")).toContainText("≈ -0,05 kg");
+  await expect(page.locator("#trend-table")).toContainText("Provisoire");
+  expect(await page.locator("#trend-chart").innerHTML()).toBe(rawChart);
+  await page.reload();
+  await expect(unit).toHaveValue("fat");
+  await expect(page.locator("#trend-kpis")).toContainText(
+    "≈ 0,05 kg équiv. gras",
+  );
+  await unit.selectOption("kcal");
+  await page.reload();
+  await expect(unit).toHaveValue("kcal");
+  await expect(page.locator("#trend-kpis")).toContainText("472 kcal");
+  await unit.selectOption("fat");
+  await page.locator('.nav-button[data-view="today"]').click();
+  await expect(page.locator("#deficit-value")).toHaveText("≈ +0,05 kg");
+  await page.locator(".balance-conversion summary").click();
+  await expect(page.locator(".balance-conversion")).toContainText("9 440 kcal");
+  await expect(page.locator(".balance-conversion a")).toHaveAttribute(
+    "href",
+    /10.1371\/journal.pcbi.1000045/,
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 1,
+    ),
+  ).toBe(false);
+  await page.screenshot({
+    path: info.outputPath("fat-equivalents.png"),
     fullPage: true,
   });
 });
