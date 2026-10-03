@@ -1,6 +1,6 @@
 import json
 from datetime import date, timedelta
-from .nutrition import resting_energy, targets, totals
+from .nutrition import resting_energy, targets, totals, nutrient_bounds, total_bounds
 
 
 def summary(store, user_id, day):
@@ -14,7 +14,10 @@ def summary(store, user_id, day):
         for row in db.execute("SELECT * FROM meals WHERE user_id=? AND day=? ORDER BY created", (user_id, day)):
             meal = dict(row)
             meal["items"] = json.loads(meal["items"])
+            for item in meal['items']:
+                item['nutrient_bounds'] = nutrient_bounds(item)
             meal["totals"] = totals(meal["items"])
+            meal['totals_bounds'] = total_bounds(meal['items'])
             info = db.execute('SELECT data FROM meal_insights WHERE meal_id=?', (meal['id'],)).fetchone()
             meal['clarifications'] = json.loads(info[0]) if info else []
             meals.append(meal)
@@ -39,7 +42,7 @@ def summary(store, user_id, day):
     items = [item for meal in meals for item in meal["items"]]
     intake = totals(items)
     deficit = None if expenditure is None or intake["kcal"] is None or not complete else round(expenditure - intake["kcal"])
-    return {"day": day, "meals": meals, "intake": intake, "has_meals": bool(meals), "complete": complete,
+    return {"day": day, "meals": meals, "intake": intake, "intake_bounds": total_bounds(items), "has_meals": bool(meals), "complete": complete,
             "resting": resting, "expenditure": expenditure, "expenditure_source": source,
             "projected": day >= today, "garmin": garmin, "targets": targets(profile, expenditure),
             "deficit": deficit, "estimated_portions": sum(bool(i.get("estimated")) for i in items),

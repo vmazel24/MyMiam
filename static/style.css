@@ -603,6 +603,17 @@ p + p {
 .food-nutrients strong {
   color: var(--ink);
 }
+.meal-macros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--ink);
+}
+.compact-macros .macro-number:has(+ .footnote) {
+  font-size: 22px;
+}
 .meal-food {
   margin-top: 12px;
   padding-top: 8px;

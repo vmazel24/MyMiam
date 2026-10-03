@@ -509,6 +509,7 @@ def create_app(config=None):
                 'label': items[index].get('label') or items[index]['name'],
                 'note': group['label'] + ' · ' + option['label']}])[0]
             group['selected'] = option_index
+            group['resolved'] = True
             db.execute('UPDATE meals SET items=? WHERE id=?', (json.dumps(items), meal_id))
             db.execute('UPDATE meal_insights SET data=? WHERE meal_id=?', (json.dumps(groups), meal_id))
             refresh_day(db, meal['day'])

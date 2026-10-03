@@ -135,6 +135,43 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(day['deficit'])
         self.assertEqual(trends(self.store,self.user['id'],self.day)['covered_days'],0)
 
+    def test_published_detection_limits_scale_and_aggregate_without_changing_history(self):
+        with self.store.connect() as db:
+            db.execute("UPDATE foods SET nutrients=?,flags=? WHERE id='ciqual:rice'",
+                (json.dumps({'kcal': 130, 'protein': 2.6, 'carbs': 28, 'fat': None, 'fiber': 0}),
+                 json.dumps({'fat': 'Inférieur à 0.18'})))
+        meal_id = self.meal(items=[{'food_id': 'ciqual:rice', 'grams': 200},
+                                  {'food_id': 'ciqual:chicken', 'grams': 100}]).json['id']
+        with self.store.connect() as db:
+            before = db.execute('SELECT items FROM meals WHERE id=?', (meal_id,)).fetchone()[0]
+        day = self.client.get('/api/dashboard?day=' + self.day).json
+        meal = day['meals'][0]
+        self.assertIsNone(day['intake']['fat'])
+        self.assertEqual(meal['items'][0]['nutrient_bounds']['fat'],
+                         {'lower': 0, 'upper': 0.36, 'upper_exclusive': True})
+        known = meal['items'][1]['nutrients']['fat']
+        self.assertEqual(day['intake_bounds']['fat'],
+                         {'lower': known, 'upper': known + 0.36, 'upper_exclusive': True})
+        self.assertEqual(day['intake_bounds'], meal['totals_bounds'])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT items FROM meals WHERE id=?', (meal_id,)).fetchone()[0], before)
+
+    def test_detection_limit_does_not_hide_another_truly_unknown_value(self):
+        for index, flag in enumerate(('Valeur absente', 'Traces : quantité non chiffrée', 'Supérieur à 0.18')):
+            with self.store.connect() as db:
+                db.execute("UPDATE foods SET nutrients=?,flags=? WHERE id='ciqual:rice'",
+                    (json.dumps({'kcal': 130, 'protein': 2, 'carbs': 28, 'fat': None, 'fiber': 0}),
+                     json.dumps({'fat': flag})))
+                db.execute("UPDATE foods SET nutrients=?,flags=? WHERE id='ciqual:chicken'",
+                    (json.dumps({'kcal': 165, 'protein': 20, 'carbs': 0, 'fat': None, 'fiber': 0}),
+                     json.dumps({'fat': 'Inférieur à 0.18'})))
+            response = self.meal(request_id='unbounded_request_' + str(index),
+                items=[{'food_id': 'ciqual:rice', 'grams': 200}, {'food_id': 'ciqual:chicken', 'grams': 100}])
+            self.assertEqual(response.status_code, 201)
+            day = self.client.get('/api/dashboard?day=' + self.day).json
+            self.assertIsNone(day['intake']['fat'])
+            self.assertNotIn('fat', day['intake_bounds'])
+
     def test_unlogged_days_not_zero_intake_in_cumulative(self):
         data=trends(self.store,self.user['id'],self.day)
         self.assertEqual(data['covered_days'],0)

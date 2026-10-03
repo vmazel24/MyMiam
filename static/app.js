@@ -26,6 +26,7 @@ const slots = {
 };
 const symbols = { breakfast: "☀", lunch: "◉", dinner: "☾", snack: "✧" };
 const macroNames = { protein: "Protéines", carbs: "Glucides", fat: "Lipides" };
+const macroShort = { protein: "P", carbs: "G", fat: "L" };
 const state = {
   user: null,
   view: "today",
@@ -275,10 +276,13 @@ function renderDashboard() {
   $("macro-cards").innerHTML = Object.entries(macroNames)
     .map(([key, name]) => {
       const value = logged ? s.intake[key] : null,
+        bounds = logged ? s.intake_bounds?.[key] : null,
         target = s.targets?.[key],
         pct =
-          target && value != null ? Math.min(100, (value / target) * 100) : 0;
-      return `<article class="macro-card ${key}"><div class="macro-top">${name}</div><div class="macro-number">${fmt(value, 1)} <small>g</small></div><p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="4" rx="2"></rect></svg></article>`;
+          target && (value != null || bounds)
+            ? Math.min(100, ((value ?? bounds.lower) / target) * 100)
+            : 0;
+      return `<article class="macro-card ${key}"><div class="macro-top">${name}</div><div class="macro-number">${nutrientValue(value, bounds)} <small>g</small></div>${bounds ? '<p class="footnote">Plage calculée depuis les limites de la source.</p>' : ""}<p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="4" rx="2"></rect></svg></article>`;
     })
     .join("");
   $("garmin-day").innerHTML = ga?.has_data
@@ -295,8 +299,38 @@ function renderDashboard() {
         .join("") +
       '<p class="muted footnote">Détail des séances ; leurs calories ne sont pas ajoutées au total une seconde fois.</p></div>';
 }
-function nutrientLine(nutrients = {}) {
-  return `<div class="food-nutrients" aria-label="Valeurs pour cette portion">${["kcal", "protein", "carbs", "fat"].map((key) => `<span><strong>${fmt(nutrients[key], key === "kcal" ? 0 : 1)} ${key === "kcal" ? "kcal" : "g"}</strong>${key === "kcal" ? "" : ` ${macroNames[key]}`}</span>`).join("")}</div>`;
+function nutrientValue(value, bounds, decimals = 1) {
+  if (value != null || !bounds) return fmt(value, decimals);
+  if (bounds.lower === 0)
+    return `${bounds.upper_exclusive ? "<" : "≤"} ${fmt(bounds.upper, 2)}`;
+  return `${fmt(bounds.lower, 2)}–${fmt(bounds.upper, 2)}`;
+}
+function macroLine(nutrients, bounds = {}) {
+  return `<div class="meal-macros" aria-label="Macros du repas">${Object.entries(
+    macroShort,
+  )
+    .map(([key, label]) => {
+      const value = nutrientValue(nutrients[key], bounds[key]);
+      return `<span title="${macroNames[key]}" aria-label="${macroNames[key]} : ${escapeHTML(value)} g"><b>${label}</b> ${escapeHTML(value)} g</span>`;
+    })
+    .join("")}</div>`;
+}
+function nutrientLine(nutrients = {}, bounds = {}) {
+  return `<div class="food-nutrients" aria-label="Valeurs pour cette portion">${[
+    "kcal",
+    "protein",
+    "carbs",
+    "fat",
+  ]
+    .map((key) => {
+      const value = nutrientValue(
+        nutrients[key],
+        bounds[key],
+        key === "kcal" ? 0 : 1,
+      );
+      return `<span title="${macroNames[key] || "Énergie"}" aria-label="${macroNames[key] || "Énergie"} : ${escapeHTML(value)} ${key === "kcal" ? "kcal" : "g"}"><strong>${key === "kcal" ? "" : macroShort[key] + " "}${escapeHTML(value)} ${key === "kcal" ? "kcal" : "g"}</strong></span>`;
+    })
+    .join("")}</div>`;
 }
 function captureLoading(job) {
   return (
@@ -328,16 +362,17 @@ function renderMeals() {
     items
       .map(
         (i) =>
-          `<div class="meal-food"><p>${escapeHTML(i.label || i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}</p>${nutrientLine(i.nutrients)}<p>${escapeHTML(i.source)}${i.composition_estimated ? " · composition estimée" : ""}${i.source_url && /^https:\/\//i.test(i.source_url) ? ` · <a href="${escapeHTML(i.source_url)}" target="_blank" rel="noopener noreferrer">Voir la source</a>` : ""}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).length ? " · certaines valeurs non chiffrées" : ""}</p></div>`,
+          `<div class="meal-food"><p>${escapeHTML(i.label || i.name)} · ${fmt(i.grams, 1)} g${i.estimated ? " ≈" : ""}</p>${nutrientLine(i.nutrients, i.nutrient_bounds)}<p>${escapeHTML(i.source)}${i.composition_estimated ? " · composition estimée" : ""}${i.source_url && /^https:\/\//i.test(i.source_url) ? ` · <a href="${escapeHTML(i.source_url)}" target="_blank" rel="noopener noreferrer">Voir la source</a>` : ""}${i.note ? " · " + escapeHTML(i.note) : ""}${Object.keys(i.flags || {}).some((key) => !i.nutrient_bounds?.[key]) ? " · certaines valeurs non chiffrées" : ""}</p></div>`,
       )
       .join("");
   const mealMarkup = (m, expanded) =>
-    `<article class="meal-card" data-meal-id="${m.id}" aria-busy="${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j))}"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}${m.items.some((i) => i.nutrients.kcal == null) ? `<p class="review-note">Bilan incomplet : ${m.items.filter((i) => i.nutrients.kcal == null).length} aliment(s) sans calories estimées.</p>` : ""}${mealAnalysisStatus(m)}${m.text?.trim().length >= 3 ? `<button class="text-button reanalyse-meal" ${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j)) ? "disabled" : ""} data-reanalyse-meal="${m.id}" title="Relancer Luna sur le récit d’origine et remplacer son analyse">Réanalyser la saisie ↻</button>` : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
+    `<article class="meal-card" data-meal-id="${m.id}" aria-busy="${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j))}"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${macroLine(m.totals, m.totals_bounds)}${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}${m.items.some((i) => i.nutrients.kcal == null) ? `<p class="review-note">Bilan incomplet : ${m.items.filter((i) => i.nutrients.kcal == null).length} aliment(s) sans calories estimées.</p>` : ""}${mealAnalysisStatus(m)}${m.text?.trim().length >= 3 ? `<button class="text-button reanalyse-meal" ${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j)) ? "disabled" : ""} data-reanalyse-meal="${m.id}" title="Relancer Luna sur le récit d’origine et remplacer son analyse">Réanalyser la saisie ↻</button>` : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
   const refinements = (meal) =>
     (meal.clarifications || [])
-      .map(
-        (group, index) =>
-          `<div class="meal-refinement"><p><strong>${escapeHTML(group.label)}</strong> <span>Précision facultative</span></p><div class="choice-row">${group.options.map((option, oi) => `<button class="choice-button ${group.selected === oi ? "selected" : ""}" aria-pressed="${group.selected === oi}" data-refine-meal="${meal.id}" data-refine-group="${index}" data-refine-option="${oi}">${escapeHTML(option.label)}</button>`).join("")}</div></div>`,
+      .map((group, index) =>
+        group.resolved
+          ? ""
+          : `<div class="meal-refinement"><p><strong>${escapeHTML(group.label)}</strong> <span>Précision facultative</span></p><div class="choice-row">${group.options.map((option, oi) => `<button class="choice-button ${group.selected === oi ? "selected" : ""}" aria-pressed="${group.selected === oi}" data-refine-meal="${meal.id}" data-refine-group="${index}" data-refine-option="${oi}">${escapeHTML(option.label)}</button>`).join("")}</div></div>`,
       )
       .join("");
   const markup = (expanded) =>

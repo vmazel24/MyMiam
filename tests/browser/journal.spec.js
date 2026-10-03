@@ -120,10 +120,12 @@ test.beforeEach(async ({ page }) => {
       const option = route.request().postDataJSON().option;
       const grams = [200, 100, 300][option];
       meals[0].clarifications[0].selected = option;
+      meals[0].clarifications[0].resolved = true;
       meals[0].items[0].grams = grams;
       meals[0].totals = Object.fromEntries(
         Object.entries(food.nutrients).map(([k, v]) => [k, (v * grams) / 100]),
       );
+      meals[0].items[0].nutrients = meals[0].totals;
       data = { ok: true };
     } else if (path === "/api/meals" && route.request().method() === "POST") {
       const body = route.request().postDataJSON();
@@ -209,11 +211,14 @@ test("capture closes immediately, inferred evening meal and optional refinement"
     .getByRole("button", { name: "Grande", exact: true })
     .click();
   await expect(page.locator("#intake-kcal")).toContainText("390");
-  await expect(
-    page
-      .locator("#today-meals")
-      .getByRole("button", { name: "Grande", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#today-meals .meal-refinement")).toHaveCount(0);
+  await expect(page.locator("#today-meals .meal-macros")).toContainText(
+    "P 7,8 g",
+  );
+  await page.reload();
+  await expect(page.locator("#intake-kcal")).toContainText("390");
+  await expect(page.locator("#today-meals .meal-refinement")).toHaveCount(0);
+
   await expect(page.locator("#complete-day")).toHaveCount(0);
   expect(
     await page.evaluate(
@@ -248,9 +253,9 @@ test("journal shows estimated recipe composition and its source link", async ({
   await expect(link).toHaveAttribute("rel", "noopener noreferrer");
   const values = page.locator("#journal-meals .food-nutrients");
   await expect(values).toContainText("260 kcal");
-  await expect(values).toContainText("5,2 g Protéines");
-  await expect(values).toContainText("56 g Glucides");
-  await expect(values).toContainText("0,6 g Lipides");
+  await expect(values).toContainText("P 5,2 g");
+  await expect(values).toContainText("G 56 g");
+  await expect(values).toContainText("L 0,6 g");
   await page.locator("#journal-meals [data-edit]").click();
   await expect(page.locator("#meal-items .food-nutrients")).toContainText(
     "260 kcal",
@@ -314,6 +319,61 @@ async function savedNarrative(page) {
     ).json(),
   );
 }
+test("meal and food macros use P G L and preserve a published fat limit in the daily total", async ({
+  page,
+}) => {
+  const baseline = await savedNarrative(page);
+  const meal = baseline.meals[0];
+  meal.clarifications = [];
+  meal.items[0].nutrients.fat = null;
+  meal.items[0].nutrient_bounds = {
+    fat: { lower: 0, upper: 0.9, upper_exclusive: true },
+  };
+  meal.totals.fat = null;
+  meal.totals_bounds = meal.items[0].nutrient_bounds;
+  // Add a second food whose lipids are known, so the total has a nonzero lower bound.
+  meal.items.push({
+    ...structuredClone(meal.items[0]),
+    name: "Autre aliment",
+    nutrient_bounds: {},
+    nutrients: { kcal: 180, protein: 0, carbs: 0, fat: 20, fiber: 0 },
+  });
+  meal.totals.kcal = 440;
+  meal.totals_bounds = {
+    fat: { lower: 20, upper: 20.9, upper_exclusive: true },
+  };
+  const data = {
+    ...baseline,
+    intake: meal.totals,
+    intake_bounds: meal.totals_bounds,
+  };
+  await page.route("**/api/dashboard?**", (route) =>
+    route.fulfill({ json: data }),
+  );
+  await page.reload();
+  await expect(page.locator("#macro-cards .fat .macro-number")).toContainText(
+    "20–20,9",
+  );
+  await expect(page.locator("#today-meals .meal-macros")).toContainText(
+    "L 20–20,9 g",
+  );
+  await page.locator('.nav-button[data-view="journal"]').click();
+  await expect(
+    page.locator("#journal-meals .food-nutrients").first(),
+  ).toContainText("L < 0,9 g");
+  await expect(page.locator("#journal-meals .meal-macros")).toContainText(
+    "P 5,2 g",
+  );
+  await expect(page.locator("#journal-meals .meal-macros")).toContainText(
+    "G 56 g",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 1,
+    ),
+  ).toBe(false);
+});
+
 async function reanalysisRoutes(page, baseline, options = {}) {
   let status = options.status || "queued",
     failures = options.failures || 0,

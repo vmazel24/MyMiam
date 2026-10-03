@@ -108,6 +108,46 @@ def totals(items):
             else round(sum(i["nutrients"].get(key, 0) for i in items), 1) for key in NUTRIENTS}
 
 
+def nutrient_bounds(item):
+    """Keep a published detection limit as an interval, never an invented zero."""
+    bounds = {}
+    for key in NUTRIENTS:
+        if item['nutrients'].get(key) is not None:
+            continue
+        flag = str(item.get('flags', {}).get(key, '')).strip()
+        match = re.fullmatch(r'(Inférieur à|<|≤)\s*(\d+(?:[.,]\d+)?)', flag, re.I)
+        if not match:
+            continue
+        upper = float(match[2].replace(',', '.')) * item['grams'] / 100
+        if math.isfinite(upper) and upper > 0:
+            bounds[key] = {'lower': 0, 'upper': round(upper, 6), 'upper_exclusive': match[1] != '≤'}
+    return bounds
+
+
+def total_bounds(items):
+    result = {}
+    for key in NUTRIENTS:
+        lower = upper = 0
+        bounded = exclusive = False
+        for item in items:
+            value = item['nutrients'].get(key)
+            if value is not None:
+                lower += value
+                upper += value
+            else:
+                interval = item.get('nutrient_bounds', {}).get(key)
+                if interval is None:
+                    break  # Truly missing composition still makes the total unknown.
+                lower += interval['lower']
+                upper += interval['upper']
+                exclusive |= interval['upper_exclusive']
+                bounded = True
+        else:
+            if bounded:
+                result[key] = {'lower': round(lower, 6), 'upper': round(upper, 6), 'upper_exclusive': exclusive}
+    return result
+
+
 def validate_profile(data):
     if not isinstance(data, dict):
         raise ValueError("Profil invalide")

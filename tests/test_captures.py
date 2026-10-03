@@ -58,8 +58,27 @@ class CaptureTests(unittest.TestCase):
             json={'group': 0, 'option': 2, 'grams': 1, 'nutrients': {'kcal': 1}}, headers=self.headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(summary(self.store, self.user['id'], self.day)['intake']['kcal'], 390)
+        self.assertTrue(summary(self.store, self.user['id'], self.day)['meals'][0]['clarifications'][0]['resolved'])
         self.assertEqual(trends(self.store, self.user['id'], self.day)['cumulative_deficit'], before - 130)
         self.plan.parse.assert_called_once()
+
+    def test_refinements_resolve_independently_even_when_accepting_default(self):
+        draft = self.draft()
+        draft['items'].append(dict(draft['items'][0]))
+        draft['clarifications'].append({**draft['clarifications'][0], 'item_index': 1})
+        self.plan.parse.return_value = draft
+        capture_id = self.capture().json['id']
+        self.worker.process_one()
+        self.assertEqual(self.client.post('/api/meals/' + capture_id + '/refine',
+            json={'group': 0, 'option': 0}, headers=self.headers).status_code, 200)
+        meal = self.client.get('/api/dashboard?day=' + self.day).json['meals'][0]
+        self.assertTrue(meal['clarifications'][0]['resolved'])
+        self.assertFalse(meal['clarifications'][1].get('resolved', False))
+        self.assertEqual(self.client.post('/api/meals/' + capture_id + '/refine',
+            json={'group': 1, 'option': 2}, headers=self.headers).status_code, 200)
+        meal = self.client.get('/api/dashboard?day=' + self.day).json['meals'][0]
+        self.assertTrue(all(group['resolved'] for group in meal['clarifications']))
+        self.assertEqual(meal['totals']['kcal'], 650)
 
     def test_failed_capture_preserves_text_and_retry_succeeds(self):
         capture_id = self.capture().json['id']

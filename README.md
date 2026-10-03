@@ -110,6 +110,12 @@ réanalyse échouée conserve les anciens repas et affiche l’erreur.
 
 Luna peut proposer jusqu'à deux précisions facultatives de deux ou trois choix.
 Cliquer recalcule les nutriments depuis le catalogue sans nouvel appel IA.
+La précision choisie disparaît, et son état répondu est conservé après
+rechargement. Les repas et leurs aliments affichent les macros en P / G / L.
+Lorsqu’une source donne une limite chiffrée, par exemple « inférieur à », cette
+borne est adaptée à la portion et additionnée aux autres aliments : le total
+affiche une plage. Les valeurs exactes et les données enregistrées restent
+inchangées ; une donnée réellement absente ne devient jamais un zéro.
 Les masses explicitement données restent fixes. Une composition non retrouvée
 reste inconnue et modifiable, sans inventer de calories.
 
