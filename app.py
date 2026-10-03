@@ -409,6 +409,47 @@ def create_app(config=None):
                 (g.user['id'], day))]
         return jsonify(jobs=jobs)
 
+    @app.post("/api/meals/<meal_id>/reanalyse")
+    def reanalyse_meal(meal_id):
+        body()
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            meal = db.execute('SELECT * FROM meals WHERE id=? AND user_id=?', (meal_id, g.user['id'])).fetchone()
+            if not meal:
+                return jsonify(error='Repas introuvable'), 404
+            if len(meal['text'].strip()) < 3:
+                return jsonify(error='Ce repas n’a pas de récit à réanalyser. Tu peux modifier ses aliments.'), 400
+            origin = db.execute('SELECT group_id FROM meal_origins WHERE meal_id=?', (meal_id,)).fetchone()
+            group_id = origin[0] if origin else 'legacy:' + meal_id
+            active = db.execute('''SELECT c.id FROM captures c JOIN capture_reanalyses r ON r.capture_id=c.id
+                WHERE c.user_id=? AND r.group_id=? AND c.status IN ('queued','analysing')''',
+                (g.user['id'], group_id)).fetchone()
+            if active:
+                return jsonify(id=active[0]), 202
+            originals = [dict(row) for row in db.execute('''SELECT m.* FROM meals m JOIN meal_origins o ON o.meal_id=m.id
+                WHERE o.group_id=? AND m.user_id=? ORDER BY m.created,m.id''', (group_id, g.user['id']))] if origin else [dict(meal)]
+            scope_slot = None
+            origin_count = db.execute('SELECT COUNT(*) FROM meal_origins WHERE group_id=?', (group_id,)).fetchone()[0] if origin else 1
+            if len(originals) < origin_count or any(row['day'] != meal['day'] or row['text'] != meal['text'] for row in originals) or not meal['request_id'].startswith('capture_'):
+                # A manually edited/moved period is reanalysed on its own, so
+                # replaying the shared original narrative cannot duplicate siblings
+                # or bring back an earlier deleted/replaced period.
+                originals, scope_slot = [dict(meal)], meal['slot']
+            if limited('parse:' + g.user['id'], 30, 3600):
+                return jsonify(error='Limite de 30 interprétations par heure atteinte'), 429
+            if db.execute("SELECT COUNT(*) FROM captures WHERE user_id=? AND status IN ('queued','analysing')", (g.user['id'],)).fetchone()[0] >= 3:
+                return jsonify(error='Attends la fin des repas en cours'), 429
+            if not plan.status()['connected']:
+                raise PlanError('Connecte ton forfait ChatGPT avant de lancer Luna')
+            capture_id = str(uuid.uuid4())
+            signature = hashlib.sha256(json.dumps(originals, sort_keys=True).encode()).hexdigest()
+            db.execute('INSERT INTO captures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (
+                capture_id, g.user['id'], meal['day'], meal['slot'], meal['text'], 'queued', None, None,
+                time.time(), time.time(), 'reanalyse_' + capture_id, signature))
+            db.execute('INSERT INTO capture_reanalyses VALUES (?,?,?,?)',
+                       (capture_id, group_id, json.dumps(originals), scope_slot))
+        return jsonify(id=capture_id), 202
+
     @app.post("/api/captures/<capture_id>/retry")
     def capture_retry(capture_id):
         body()

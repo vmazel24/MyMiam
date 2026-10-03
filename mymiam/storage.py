@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import uuid
 from datetime import date
 from pathlib import Path
 
@@ -50,7 +51,21 @@ class Store:
                     food_id TEXT PRIMARY KEY, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS food_aliases (
                     alias TEXT PRIMARY KEY, food_id TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS meal_origins (
+                    meal_id TEXT PRIMARY KEY, group_id TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS origins_by_group ON meal_origins(group_id);
+                CREATE TABLE IF NOT EXISTS capture_reanalyses (
+                    capture_id TEXT PRIMARY KEY, group_id TEXT NOT NULL,
+                    originals TEXT NOT NULL, scope_slot TEXT);
             """)
+            # Backfill provenance for captures still retained by the old worker.
+            # Journal contents, quantities and totals are never changed here.
+            for job in db.execute("SELECT * FROM captures WHERE status='done'").fetchall():
+                ids = [job['id']] + [str(uuid.uuid5(uuid.NAMESPACE_URL, job['id'] + ':' + slot))
+                                     for slot in ('breakfast', 'lunch', 'dinner', 'snack')]
+                for meal_id in ids:
+                    db.execute('''INSERT OR IGNORE INTO meal_origins SELECT id,? FROM meals
+                        WHERE id=? AND user_id=? AND text=?''', (job['id'], meal_id, job['user_id'], job['text']))
         os.chmod(self.path, 0o600)
 
     def connect(self):

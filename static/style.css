@@ -614,6 +614,10 @@ p + p {
   color: var(--muted);
   margin-top: 9px;
 }
+.reanalyse-meal {
+  margin-top: 10px;
+  font-size: 11px;
+}
 .meal-calories {
   font: 900 26px var(--display);
   white-space: nowrap;

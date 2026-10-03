@@ -191,3 +191,159 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(summary(self.store, self.user['id'], self.day)['meals'], [])
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM meal_insights').fetchone()[0], 0)
+
+    def reanalyse(self, meal_id):
+        return self.client.post('/api/meals/' + meal_id + '/reanalyse', json={}, headers=self.headers)
+
+    def test_reanalysis_is_immediate_idempotent_and_replaces_without_duplicate(self):
+        original = self.capture().json['id']
+        self.worker.process_one()
+        result = self.reanalyse(original)
+        self.assertEqual(result.status_code, 202)
+        replacement = result.json['id']
+        self.assertEqual(self.reanalyse(original).json['id'], replacement)
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['intake']['kcal'], 260)
+        self.assertEqual(self.plan.parse.call_count, 1)
+        self.plan.parse.return_value['items'][0]['grams'] = 300
+        self.worker.process_one()
+        meals = summary(self.store, self.user['id'], self.day)['meals']
+        self.assertEqual(len(meals), 1)
+        self.assertEqual(meals[0]['id'], replacement)
+        self.assertEqual(meals[0]['text'], 'Ce soir du riz')
+        self.assertEqual(meals[0]['totals']['kcal'], 390)
+
+    def test_reanalysis_failure_retry_and_cancel_preserve_old_meal(self):
+        original = self.capture().json['id']
+        self.worker.process_one()
+        before = summary(self.store, self.user['id'], self.day)['meals']
+        replacement = self.reanalyse(original).json['id']
+        self.plan.parse.side_effect = PlanError('Quota épuisé')
+        self.worker.process_one()
+        self.assertEqual(self.job(replacement)['status'], 'failed')
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['meals'], before)
+        self.client.post('/api/captures/' + replacement + '/retry', json={}, headers=self.headers)
+        def cancelled(*args):
+            self.client.delete('/api/captures/' + replacement, json={}, headers=self.headers)
+            return self.draft()
+        self.plan.parse.side_effect = cancelled
+        self.worker.process_one()
+        self.assertEqual(self.job(replacement)['status'], 'cancelled')
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['meals'], before)
+
+    def test_reanalysis_does_not_overwrite_edits_or_restore_deleted_meals(self):
+        original = self.capture().json['id']
+        self.worker.process_one()
+        replacement = self.reanalyse(original).json['id']
+        def modified(*args):
+            meal = summary(self.store, self.user['id'], self.day)['meals'][0]
+            self.client.put('/api/meals/' + original, json={**meal,
+                'items': [{'food_id': 'ciqual:rice', 'grams': 180}]}, headers=self.headers)
+            return self.draft()
+        self.plan.parse.side_effect = modified
+        self.worker.process_one()
+        self.assertEqual(self.job(replacement)['status'], 'failed')
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['intake']['kcal'], 234)
+        replacement2 = self.reanalyse(original).json['id']
+        def deleted(*args):
+            self.client.delete('/api/meals/' + original, json={}, headers=self.headers)
+            return self.draft()
+        self.plan.parse.side_effect = deleted
+        self.worker.process_one()
+        self.assertEqual(self.job(replacement2)['status'], 'failed')
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['meals'], [])
+
+    def test_reanalysing_split_narrative_replaces_all_siblings_once(self):
+        original = self.capture(text='A midi du riz et ce soir du riz').json['id']
+        self.worker.process_one()  # Original legacy analysis had one evening meal.
+        draft = self.draft()
+        draft['items'] = [{**draft['items'][0], 'slot': slot} for slot in ('lunch', 'dinner')]
+        self.plan.parse.return_value = draft
+        self.reanalyse(original)
+        self.worker.process_one()
+        meals = summary(self.store, self.user['id'], self.day)['meals']
+        self.assertEqual(len(meals), 2)
+        self.assertEqual({m['slot'] for m in meals}, {'lunch', 'dinner'})
+        # Clicking either sibling reanalyses the original capture, not an extra
+        # copy of its other period. Even concurrent clicks share the same job.
+        first = self.reanalyse(meals[0]['id']).json['id']
+        self.assertEqual(self.reanalyse(meals[1]['id']).json['id'], first)
+        self.worker.process_one()
+        day = summary(self.store, self.user['id'], self.day)
+        self.assertEqual(len(day['meals']), 2)
+        self.assertEqual(day['intake']['kcal'], 520)
+
+    def test_reanalysis_owner_isolation_missing_text_and_manual_period_scope(self):
+        original = self.capture(text='Ce midi du riz et ce soir du riz').json['id']
+        self.worker.process_one()
+        with self.store.connect() as db:
+            db.execute("UPDATE meals SET request_id='manual_request_12345' WHERE id=?", (original,))
+        draft = self.draft()
+        draft['items'] = [{**draft['items'][0], 'slot': slot} for slot in ('lunch', 'dinner')]
+        self.plan.parse.return_value = draft
+        self.reanalyse(original)
+        self.worker.process_one()
+        day = summary(self.store, self.user['id'], self.day)
+        self.assertEqual(len(day['meals']), 1)
+        self.assertEqual(day['meals'][0]['slot'], 'dinner')
+        meal_id = day['meals'][0]['id']
+        with self.store.connect() as db:
+            db.execute("UPDATE meals SET text='' WHERE id=?", (meal_id,))
+        self.assertEqual(self.reanalyse(meal_id).status_code, 400)
+        with self.store.connect() as db:
+            db.execute("UPDATE meals SET user_id='other' WHERE id=?", (meal_id,))
+        self.assertEqual(self.reanalyse(meal_id).status_code, 404)
+
+    def test_migration_restores_origin_links_without_altering_journal(self):
+        from mymiam.storage import Store
+        original = self.capture().json['id']
+        self.worker.process_one()
+        before = summary(self.store, self.user['id'], self.day)['meals']
+        with self.store.connect() as db:
+            db.execute('DELETE FROM meal_origins')
+        reopened = Store(self.store.directory)
+        self.assertEqual(summary(reopened, self.user['id'], self.day)['meals'], before)
+        with reopened.connect() as db:
+            self.assertEqual(db.execute('SELECT group_id FROM meal_origins WHERE meal_id=?', (original,)).fetchone()[0], original)
+
+    def test_reanalysis_preserves_explicitly_corrected_quantities(self):
+        original = self.capture().json['id']
+        self.worker.process_one()
+        meal = summary(self.store, self.user['id'], self.day)['meals'][0]
+        self.client.put('/api/meals/' + original, json={**meal,
+            'items': [{'food_id': 'ciqual:rice', 'grams': 180, 'estimated': False}]}, headers=self.headers)
+        self.reanalyse(original)
+        self.worker.process_one()  # Model mock still guesses 200 g.
+        day = summary(self.store, self.user['id'], self.day)
+        self.assertEqual(day['intake']['kcal'], 234)
+        self.assertEqual(day['meals'][0]['items'][0]['grams'], 180)
+        self.assertEqual(day['meals'][0]['clarifications'], [])
+        self.assertEqual(self.plan.parse.call_args[0][2]['reviewed_items'][0]['grams'], 180)
+
+    def test_failed_split_replacement_rolls_back_original_meal(self):
+        original = self.capture().json['id']
+        self.worker.process_one()
+        before = summary(self.store, self.user['id'], self.day)['meals']
+        draft = self.draft()
+        draft['items'] = [{**draft['items'][0], 'slot': slot} for slot in ('lunch', 'dinner')]
+        self.plan.parse.return_value = draft
+        replacement = self.reanalyse(original).json['id']
+        with self.store.connect() as db:
+            db.execute("CREATE TRIGGER reject_reanalysis_dinner BEFORE INSERT ON meals WHEN NEW.slot='dinner' BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+        self.worker.process_one()
+        self.assertEqual(self.job(replacement)['status'], 'failed')
+        self.assertEqual(summary(self.store, self.user['id'], self.day)['meals'], before)
+
+    def test_reanalysis_does_not_resurrect_previously_deleted_period(self):
+        draft = self.draft()
+        draft['items'] = [{**draft['items'][0], 'slot': slot} for slot in ('lunch', 'dinner')]
+        self.plan.parse.return_value = draft
+        self.capture(text='A midi du riz et ce soir du riz')
+        self.worker.process_one()
+        by_slot = {m['slot']: m for m in summary(self.store, self.user['id'], self.day)['meals']}
+        self.client.delete('/api/meals/' + by_slot['lunch']['id'], json={}, headers=self.headers)
+        self.reanalyse(by_slot['dinner']['id'])
+        self.worker.process_one()
+        day = summary(self.store, self.user['id'], self.day)
+        self.assertEqual(len(day['meals']), 1)
+        self.assertEqual(day['meals'][0]['slot'], 'dinner')
+        self.assertEqual(day['intake']['kcal'], 260)

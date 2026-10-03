@@ -126,6 +126,23 @@ def favorite_context(store, user_id):
                 for r in db.execute('SELECT * FROM favorites WHERE user_id=? LIMIT 20', (user_id,))]
 
 
+def preserve_reviewed_quantities(parsed, originals):
+    recorded = [(meal['slot'], item) for meal in originals for item in json.loads(meal['items'])]
+    def same_food(new, old):
+        return bool(new.get('food_id') and new['food_id'] == old['food_id']) or (
+            normalize(new.get('label', '')) == normalize(old.get('label') or old['name']))
+    for item in parsed.get('items', []):
+        slot = item.get('slot', parsed.get('slot'))
+        matches = [old for period, old in recorded if period == slot and same_food(item, old)]
+        if len(matches) != 1 or matches[0].get('estimated'):
+            continue
+        old = matches[0]
+        if sum(same_food(other, old) and other.get('slot', parsed.get('slot')) == slot
+               for other in parsed['items']) != 1:
+            continue
+        item.update(grams=old['grams'], estimated=False)
+
+
 class CaptureWorker:
     def __init__(self, store, plan):
         self.store, self.plan = store, plan
@@ -142,13 +159,39 @@ class CaptureWorker:
         try:
             text = job['text']
             context = {'day': job['day'], 'slot_hint': job['slot_hint'], 'local_hour': datetime.now().hour}
-            draft = prepare_draft(self.store, self.plan.parse(text, favorite_context(self.store, job['user_id']), context), context)
+            with self.store.connect() as db:
+                row = db.execute('SELECT * FROM capture_reanalyses WHERE capture_id=?', (job['id'],)).fetchone()
+                reanalysis = dict(row) if row else None
+            originals = json.loads(reanalysis['originals']) if reanalysis else []
+            if originals:
+                context['reviewed_items'] = [{'label': item.get('label') or item['name'], 'grams': item['grams'], 'slot': meal['slot']}
+                    for meal in originals for item in json.loads(meal['items']) if not item.get('estimated')]
+                context['only_slot'] = reanalysis['scope_slot']
+            parsed = self.plan.parse(text, favorite_context(self.store, job['user_id']), context)
+            if reanalysis and reanalysis['scope_slot']:
+                parsed['items'] = [item for item in parsed.get('items', [])
+                    if item.get('slot', parsed.get('slot')) == reanalysis['scope_slot']]
+                # Global item indexes no longer address the filtered list.
+                parsed['clarifications'] = []
+            if originals:
+                preserve_reviewed_quantities(parsed, originals)
+            draft = prepare_draft(self.store, parsed, context)
             groups = [(group, resolve_items(self.store, group['items'])) for group in split_draft(draft)]
             with self.store.connect() as db:
                 db.execute('BEGIN IMMEDIATE')
                 row = db.execute('SELECT status FROM captures WHERE id=?', (job['id'],)).fetchone()
                 if not row or row[0] == 'cancelled':
                     return True
+                if originals:
+                    for original in originals:
+                        current = db.execute('SELECT * FROM meals WHERE id=? AND user_id=?', (original['id'], job['user_id'])).fetchone()
+                        if not current or dict(current) != original:
+                            raise PlanError('Le repas a été modifié pendant la réanalyse. Tes changements sont conservés ; relance depuis le repas actuel.')
+                    for original in originals:
+                        db.execute('DELETE FROM meal_insights WHERE meal_id=?', (original['id'],))
+                        # Keep provenance tombstones: later reanalyses of an old
+                        # sibling must not bring this replaced period back.
+                        db.execute('DELETE FROM meals WHERE id=?', (original['id'],))
                 for index, (group, items) in enumerate(groups):
                     meal_id = job['id'] if index == 0 else str(uuid.uuid5(uuid.NAMESPACE_URL, job['id'] + ':' + group['slot']))
                     inserted = db.execute('INSERT OR IGNORE INTO meals VALUES (?,?,?,?,?,?,?,?,?)',
@@ -156,6 +199,7 @@ class CaptureWorker:
                          text, json.dumps(items), datetime.now(timezone.utc).isoformat(), 'capture_' + meal_id))
                     if inserted.rowcount:
                         db.execute('INSERT INTO meal_insights VALUES (?,?)', (meal_id, json.dumps(group['clarifications'])))
+                        db.execute('INSERT INTO meal_origins VALUES (?,?)', (meal_id, job['id']))
                 self.store.refresh_day(db, job['user_id'], job['day'])
                 db.execute("UPDATE captures SET status='done',meal_id=?,text=?,error=NULL,updated=? WHERE id=?",
                            (job['id'], text, time.time(), job['id']))
@@ -177,3 +221,4 @@ class CaptureWorker:
             for row in db.execute("SELECT id FROM captures WHERE status IN ('cancelled','done') AND created<?",
                                   (time.time() - 86400,)).fetchall():
                 db.execute('DELETE FROM captures WHERE id=?', (row['id'],))
+                db.execute('DELETE FROM capture_reanalyses WHERE capture_id=?', (row['id'],))

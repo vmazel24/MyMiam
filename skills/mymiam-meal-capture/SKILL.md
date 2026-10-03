@@ -7,6 +7,9 @@ description: "Interpréter un repas dicté ou écrit dans MyMiam, estimer les po
 
 Produire directement la meilleure estimation dans le schéma JSON demandé.
 Ne jamais poser de question ouverte, demander un poids ou attendre une validation.
+En réanalyse, `reviewed_items` contient les quantités déjà saisies explicitement :
+les préserver pour les mêmes aliments/créneaux. Si `only_slot` est fourni, ne
+traiter que ce créneau ; les autres repas sont conservés par MyMiam.
 
 - Déduire le créneau du récit : matin/petit déjeuner → breakfast, midi/déjeuner
   → lunch, soir/dîner/souper → dinner, goûter/collation → snack. Le récit prime

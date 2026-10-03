@@ -267,6 +267,14 @@ et macros par portion sont visibles dans les aliments du journal et leur éditeu
 L'hypothèse de quantité est affichée directement lorsqu'elle est utile, sans
 case à cocher. Modifier le poids remplace cette hypothèse par la quantité saisie.
 
+Les analyses déjà enregistrées ne sont pas relancées par une mise à jour du code.
+« Réanalyser la saisie » reprend le récit d'origine via Luna et remplace son
+résultat dans le journal une fois le traitement réussi. Les repas issus d'une
+même saisie sont remplacés ensemble pour éviter les doublons. L'ancien résultat
+reste visible en cas d'échec ou d'annulation ; une modification pendant le
+traitement empêche le remplacement. Les aliments sans kcal rendent le bilan
+incomplet, ce qui est indiqué sur la carte du repas.
+
 La dictée affiche ses résultats provisoires dans un champ en lecture seule.
 Sur Android, la reconnaissance reprend après les pauses en séparant les phrases,
 pour éviter l'accumulation des hypothèses partielles dans le mode continu.

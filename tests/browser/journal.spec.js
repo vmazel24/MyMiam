@@ -104,6 +104,17 @@ test.beforeEach(async ({ page }) => {
         }
         data = { jobs };
       }
+    } else if (path.endsWith("/reanalyse")) {
+      jobs = [
+        {
+          id: "capture-reanalysis",
+          text: meals[0].text,
+          day: localDay(),
+          status: "queued",
+        },
+      ];
+      pendingReads = 0;
+      data = { id: "capture-reanalysis" };
     } else if (path.endsWith("/refine")) {
       const option = route.request().postDataJSON().option;
       const grams = [200, 100, 300][option];
@@ -254,6 +265,35 @@ test("journal shows estimated recipe composition and its source link", async ({
   await expect(page.locator("#meal-items .food-nutrients")).toContainText(
     "130 kcal",
   );
+});
+
+test("existing meal can be reanalysed without retyping or duplicate cards", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Ajouter un repas · Soir", exact: true })
+    .click();
+  await page.locator("#meal-text").fill("Ce soir du riz");
+  await page.getByRole("button", { name: "Envoyer à Luna" }).click();
+  await expect(page.locator("#intake-kcal")).toContainText("260", {
+    timeout: 10000,
+  });
+  const request = page.waitForRequest(
+    (r) =>
+      r.url().endsWith("/api/meals/capture-demo/reanalyse") &&
+      r.method() === "POST",
+  );
+  await page
+    .locator("#today-meals")
+    .getByRole("button", { name: "Réanalyser la saisie" })
+    .click();
+  await request;
+  await expect(page.locator("#today-captures")).toContainText("Repas reçu");
+  await expect(page.locator("#today-meals .meal-card")).toHaveCount(1);
+  await expect(page.locator("#today-captures .capture-job")).toHaveCount(0, {
+    timeout: 10000,
+  });
+  await expect(page.locator("#today-meals .meal-card")).toHaveCount(1);
 });
 
 async function fakeSpeech(page, error = null) {

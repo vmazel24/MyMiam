@@ -300,7 +300,7 @@ function renderMeals() {
       )
       .join("");
   const mealMarkup = (m, expanded) =>
-    `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
+    `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}${m.items.some((i) => i.nutrients.kcal == null) ? `<p class="review-note">Bilan incomplet : ${m.items.filter((i) => i.nutrients.kcal == null).length} aliment(s) sans calories estimées.</p>` : ""}${m.text?.trim().length >= 3 ? `<button class="text-button reanalyse-meal" data-reanalyse-meal="${m.id}" title="Relancer Luna sur le récit d’origine et remplacer son analyse">Réanalyser la saisie ↻</button>` : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
   const refinements = (meal) =>
     (meal.clarifications || [])
       .map(
@@ -948,6 +948,18 @@ document.addEventListener("click", async (event) => {
       await loadDashboard();
       if (state.view === "trends") await loadTrends();
       toast("Estimation précisée. Le bilan est à jour.");
+    }
+    if (button.dataset.reanalyseMeal) {
+      await busy(button, () =>
+        api(`/api/meals/${button.dataset.reanalyseMeal}/reanalyse`, {
+          method: "POST",
+          body: {},
+        }),
+      );
+      await loadCaptures();
+      toast(
+        "Réanalyse lancée. L’ancien résultat reste visible jusqu’au remplacement.",
+      );
     }
     if (button.dataset.retryCapture) {
       await busy(button, () =>
