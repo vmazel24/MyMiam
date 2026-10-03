@@ -191,20 +191,20 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
   Ce choix se situe dans les intervalles Anses pour l'adulte (protéines 10–20 %,
   glucides 40–55 %, lipides 35–40 % de l'apport énergétique total), et ne constitue
   pas une prescription individualisée. [Référence Anses, tableau 4](https://www.anses.fr/sites/default/files/NUT2012SA0103Ra-1.pdf).
-- Pour les jours passés renseignés par Garmin, le **total quotidien remplace**
-  l'estimation du profil ; les calories actives sont déjà incluses. Aujourd'hui,
-  l'objectif vaut **repos estimé sur 24 h + calories actives Garmin du jour −
-  déficit cible**. Le facteur d'activité est remplacé par les calories actives
-  remontées, pour les compter une seule fois. Le total Garmin accumulé reste
-  affiché séparément de cette projection sur 24 h. Sans calories actives
-  disponibles, l'estimation habituelle du profil reste le repli. Le détail du
-  calcul est affiché sous le compteur, et chaque synchronisation actualise
-  l'objectif, les macros, la jauge et le bilan provisoire.
+- Dès qu'un total Garmin est disponible, il est la **seule référence de
+  dépense**, y compris aujourd'hui. L'objectif vaut **total Garmin − déficit
+  cible**, avec un plancher à zéro. Les calories actives sont déjà incluses
+  dans ce total et ne sont jamais ajoutées une deuxième fois. Aujourd'hui,
+  les données et l'objectif sont provisoires et évoluent avec chaque
+  synchronisation, sans projection MyMiam sur 24 h. Un total Garmin utilisable
+  suffit même si le détail des calories actives ou de fonctionnement manque.
+  L'estimation depuis le profil et son facteur d'activité sert uniquement
+  en l'absence de données Garmin utilisables. Le détail du calcul est affiché
+  sous le compteur ; les macros, la jauge et le bilan suivent cette même base.
   Le bilan affiche la dépense utilisée dans le calcul de l'objectif ; la carte
   Garmin distingue son total, ses calories actives et l'estimation des calories
   de fonctionnement du corps sur la période écoulée. Garmin estime ces dernières
-  depuis son profil, avec une marge pour les mouvements légers ; elles diffèrent
-  de la projection MyMiam sur 24 h.
+  depuis son profil, avec une marge pour les mouvements légers.
   [Définition Garmin](https://support.garmin.com/en-CA/?faq=lkl4cwCLlK7ox362uGQEV7).
 - Le déficit est signé (`dépense − apports`) ; les surplus réduisent le cumul.
   Le cumul porte automatiquement sur les jours passés avec au moins un repas

@@ -236,15 +236,16 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(day['targets']['kcal'], 2350)
         self.assertEqual(day['target_breakdown']['active'], 850)
 
-    def test_partial_garmin_adds_active_to_full_day_rest_once(self):
+    def test_partial_garmin_total_replaces_profile_estimate(self):
         day=date.today().isoformat()
         raw=normalize_stats({'totalKilocalories':500,'activeKilocalories':50,'bmrKilocalories':450},day)
         with self.store.connect() as db:db.execute('INSERT INTO garmin_days VALUES (?,?,?)',(self.user['id'],day,json.dumps(raw)))
-        result=summary(self.store,self.user['id'],day)
+        with patch('mymiam.dashboard.resting_energy', side_effect=AssertionError('No profile estimate with Garmin')):
+            result=summary(self.store,self.user['id'],day)
         self.assertTrue(result['garmin']['partial'])
-        self.assertEqual(result['expenditure'], result['resting'] + 50)
-        self.assertEqual(result['targets']['kcal'], result['resting'] + 50 - 250)
-        self.assertNotEqual(result['expenditure'], 500)
+        self.assertEqual(result['resting'], 450)
+        self.assertEqual(result['expenditure'], 500)
+        self.assertEqual(result['targets']['kcal'], 250)
         self.assertNotEqual(result['expenditure'], round(result['resting'] * 1.4) + 50)
         self.assertEqual(result['target_breakdown']['base'], result['resting'])
 
@@ -258,7 +259,7 @@ class CoreTests(unittest.TestCase):
             with self.store.connect() as db:
                 db.execute('INSERT OR REPLACE INTO garmin_days VALUES (?,?,?)', (self.user['id'], day, json.dumps(raw)))
             result = self.client.get('/api/dashboard?day=' + day).json
-            goal = result['resting'] + active - 250
+            goal = 450 + active - 250
             self.assertEqual(result['targets']['kcal'], goal)
             self.assertEqual(result['targets']['protein'], round(goal * .20 / 4))
             self.assertEqual(result['targets']['carbs'], round(goal * .45 / 4))
@@ -266,20 +267,56 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result['deficit'], result['resting'] + active - 260)
             self.assertEqual(trends(self.store, self.user['id'], day)['covered_days'], 0)
 
-    def test_partial_garmin_without_active_calories_keeps_profile_fallback(self):
+    def test_partial_garmin_without_active_calories_or_profile_still_uses_total(self):
         day = date.today().isoformat()
+        self.meal(day=day)
         raw = normalize_stats({'totalKilocalories': 500, 'bmrKilocalories': 500}, day)
         with self.store.connect() as db:
             db.execute('INSERT INTO garmin_days VALUES (?,?,?)', (self.user['id'], day, json.dumps(raw)))
         result = summary(self.store, self.user['id'], day)
-        self.assertEqual(result['expenditure'], round(result['resting'] * 1.4))
+        self.assertEqual(result['expenditure'], 500)
+        self.assertEqual(result['targets']['kcal'], 250)
         self.assertIsNone(result['target_breakdown'])
         with self.store.connect() as db:
             db.execute('DELETE FROM profiles WHERE user_id=?', (self.user['id'],))
         result = summary(self.store, self.user['id'], day)
         self.assertIsNone(result['targets'])
-        self.assertIsNone(result['expenditure'])
-        self.assertIsNone(result['deficit'])
+        self.assertEqual(result['expenditure'], 500)
+        self.assertEqual(result['deficit'], 240)
+
+    def test_todays_garmin_target_stays_independent_of_profile_expenditure_parameters(self):
+        day = date.today().isoformat()
+        self.client.put('/api/profile', json={**self.profile, 'deficit': 200}, headers=self.headers)
+        raw = normalize_stats({'totalKilocalories': 2247, 'activeKilocalories': 210, 'bmrKilocalories': 2037}, day)
+        with self.store.connect() as db:
+            db.execute('INSERT INTO garmin_days VALUES (?,?,?)', (self.user['id'], day, json.dumps(raw)))
+        result = summary(self.store, self.user['id'], day)
+        self.assertEqual(result['expenditure'], 2247)
+        self.assertEqual(result['targets']['kcal'], 2047)
+        self.assertEqual(result['resting'], 2037)
+        self.client.put('/api/profile', json={**self.profile, 'deficit': 200, 'weight': 110, 'height': 185,
+                                              'activity_factor': 2.0}, headers=self.headers)
+        with patch('mymiam.dashboard.resting_energy', side_effect=AssertionError('No profile estimate with Garmin')):
+            self.assertEqual(summary(self.store, self.user['id'], day)['targets']['kcal'], 2047)
+            # A total alone is still usable; missing components stay unknown.
+            raw = normalize_stats({'totalKilocalories': 2247}, day)
+            with self.store.connect() as db:
+                db.execute('UPDATE garmin_days SET data=? WHERE user_id=? AND day=?', (json.dumps(raw), self.user['id'], day))
+            result = summary(self.store, self.user['id'], day)
+            self.assertEqual(result['targets']['kcal'], 2047)
+            self.assertIsNone(result['resting'])
+            self.assertIsNone(result['target_breakdown'])
+
+    def test_unavailable_garmin_keeps_profile_estimate(self):
+        day = date.today().isoformat()
+        for raw in ({}, {'totalKilocalories': 0}, {'totalKilocalories': None}):
+            with self.store.connect() as db:
+                db.execute('INSERT OR REPLACE INTO garmin_days VALUES (?,?,?)',
+                           (self.user['id'], day, json.dumps(normalize_stats(raw, day))))
+            result = summary(self.store, self.user['id'], day)
+            self.assertEqual(result['resting'], resting_energy(self.profile, day))
+            self.assertEqual(result['expenditure'], round(result['resting'] * self.profile['activity_factor']))
+            self.assertEqual(result['targets']['kcal'], result['expenditure'] - self.profile['deficit'])
 
     def test_today_excluded_from_cumulative_automatically(self):
         self.meal(day=date.today().isoformat())

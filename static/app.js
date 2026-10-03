@@ -314,9 +314,7 @@ function renderDashboard() {
   );
   $("expenditure-label").textContent = ga?.has_data
     ? ga.partial
-      ? s.expenditure == null
-        ? "Garmin · dépense à ce stade"
-        : "Dépense projetée sur 24 h"
+      ? "Garmin · dépense à ce stade"
       : "Garmin · dépense de la journée"
     : "Dépense estimée sur 24 h";
   const displayedExpenditure =
@@ -355,22 +353,17 @@ function renderDashboard() {
     : s.complete
       ? "Bilan actualisé"
       : "Journée non saisie";
-  $("expenditure-note").textContent =
-    ga?.has_data && ga.partial
-      ? `Le total Garmin est provisoire. ${s.expenditure == null ? "Complète ton profil pour définir un objectif sur 24 h." : `Objectif basé sur une dépense projetée de ${fmt(s.expenditure)} kcal sur 24 h.`}`
-      : s.expenditure == null
-        ? "Complète ton profil pour calculer tes repères."
-        : `${s.expenditure_source}${s.projected ? " · bilan provisoire" : ""}.${s.resting == null ? "" : ` Repos estimé : ${fmt(s.resting)} kcal.`}`;
+  $("expenditure-note").textContent = ga?.has_data
+    ? goal == null
+      ? `Dépense issue de Garmin.${s.projected ? " Total provisoire." : ""} Complète ton profil pour définir le déficit cible et ton objectif.`
+      : `${fmt(s.expenditure)} kcal Garmin${ga.partial ? " à ce stade" : ""} − ${fmt(s.target_deficit)} kcal de déficit cible = ${fmt(goal)} kcal d’objectif.${s.projected ? " Objectif provisoire, actualisé à chaque synchronisation Garmin." : ""}`
+    : s.expenditure == null
+      ? "Complète ton profil pour calculer tes repères."
+      : `${s.expenditure_source}${s.projected ? " · bilan provisoire" : ""}.${s.resting == null ? "" : ` Repos estimé : ${fmt(s.resting)} kcal.`}`;
   if (s.target_breakdown && goal != null) {
     const b = s.target_breakdown;
-    const baseLabel =
-      b.base_source === "Repos estimé sur 24 h"
-        ? "Fonctionnement du corps sur 24 h (profil)"
-        : b.base_source === "Repos Garmin"
-          ? "Fonctionnement du corps (Garmin)"
-          : b.base_source;
     $("expenditure-note").textContent =
-      `${baseLabel} : ${fmt(b.base)} + ${fmt(b.active)} kcal actives − ${fmt(b.deficit)} kcal de déficit cible = ${fmt(goal)} kcal d’objectif.${s.projected ? " Objectif provisoire, actualisé à chaque synchronisation Garmin." : ""}`;
+      `Fonctionnement du corps (Garmin) : ${fmt(b.base)} + ${fmt(b.active)} kcal actives − ${fmt(b.deficit)} kcal de déficit cible = ${fmt(goal)} kcal d’objectif.${s.projected ? " Objectif provisoire, actualisé à chaque synchronisation Garmin." : ""}`;
   }
   $("macro-cards").innerHTML = Object.entries(macroNames)
     .map(([key, name]) => {
@@ -385,7 +378,7 @@ function renderDashboard() {
     })
     .join("");
   $("garmin-day").innerHTML = ga?.has_data
-    ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total Garmin ${ga.partial ? "à ce stade" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Mouvements et activités</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Fonctionnement du corps · Garmin</span></div></div><p class="muted footnote">Ton corps dépense de l’énergie en permanence pour respirer, faire battre le cœur et maintenir sa température. Garmin estime cette dépense à partir de ton profil, avec une marge pour les mouvements légers du quotidien. ${ga.partial ? "Les chiffres couvrent la journée depuis minuit, jusqu’à la dernière synchronisation." : "Les chiffres couvrent la journée entière."} Le total comprend cette dépense et les mouvements et activités.</p><p class="muted footnote">${ga.partial ? (s.target_breakdown ? `L’objectif utilise une autre base : ${fmt(s.target_breakdown.base)} kcal sur 24 h estimées depuis ton profil MyMiam (poids, taille, âge et sexe), auxquelles s’ajoutent les ${fmt(ga.active)} kcal actives Garmin, puis le déficit cible est retiré.` : "Complète ton profil et synchronise tes calories actives pour calculer ton objectif.") : "Pour cette journée passée, l’objectif utilise le total Garmin."} Synchronisation automatique chaque heure. Dernière mise à jour : ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
+    ? `<div class="activity-values"><div><strong>${fmt(ga.total)} <small>kcal</small></strong><span>Total Garmin ${ga.partial ? "à ce stade" : "de la journée"}</span></div><div><strong>${fmt(ga.active)} <small>kcal</small></strong><span>Mouvements et activités</span></div><div><strong>${fmt(ga.resting)} <small>kcal</small></strong><span>Fonctionnement du corps · Garmin</span></div></div><p class="muted footnote">Ton corps dépense de l’énergie en permanence pour respirer, faire battre le cœur et maintenir sa température. Garmin estime cette dépense à partir de ton profil, avec une marge pour les mouvements légers du quotidien. ${ga.partial ? "Les chiffres couvrent la journée depuis minuit, jusqu’à la dernière synchronisation." : "Les chiffres couvrent la journée entière."} Le total comprend cette dépense et les mouvements et activités.</p><p class="muted footnote">L’objectif utilise ce total Garmin, auquel le déficit cible est retiré.${ga.partial ? " Il augmente au fil des calories remontées dans la journée." : ""} Synchronisation automatique chaque heure. Dernière mise à jour : ${escapeHTML(new Date(ga.synced_at).toLocaleString("fr-FR"))}.</p>`
     : `<p class="muted">Aucune donnée Garmin pour cette journée. ${state.integrations?.garmin?.connected ? "Tu peux lancer une synchronisation depuis ton profil." : "Connecte Garmin depuis ton profil pour suivre ta dépense."}</p>`;
   if (ga?.activities?.length)
     $("garmin-day").innerHTML +=

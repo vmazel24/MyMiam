@@ -1170,7 +1170,7 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
           fat: Math.round((goal * 0.35) / 9),
         },
         expenditure,
-        expenditure_source: "Repos estimé sur 24 h + calories actives Garmin",
+        expenditure_source: "Total Garmin",
         resting: 2300,
         deficit: expenditure - 2300,
         projected: true,
@@ -1179,14 +1179,14 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
           base: 2300,
           active,
           deficit: 200,
-          base_source: "Repos estimé sur 24 h",
+          base_source: "Repos Garmin",
         },
         garmin: {
           has_data: true,
           partial: true,
           active,
-          resting: 450,
-          total: 450 + active,
+          resting: 2300,
+          total: 2300 + active,
           synced_at: new Date().toISOString(),
           activities: [],
         },
@@ -1220,14 +1220,18 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
   await expect(page.locator(".energy-card")).not.toHaveClass(/is-over-goal/);
   await expect(page.locator("#expenditure-value")).toHaveText(/2\s900 kcal/);
   await expect(page.locator("#expenditure-label")).toHaveText(
-    "Dépense projetée sur 24 h",
+    "Garmin · dépense à ce stade",
   );
-  await expect(page.locator("#garmin-day")).toContainText(/1\s050/);
+  await expect(page.locator("#garmin-day")).toContainText(/2\s900/);
+  await expect(page.locator("#garmin-day")).not.toContainText("profil MyMiam");
   await expect(page.locator("#garmin-day")).toContainText(
     "Fonctionnement du corps · Garmin",
   );
   await expect(page.locator("#expenditure-note")).toContainText(
     /2\s300 \+ 600 kcal actives − 200/,
+  );
+  await expect(page.locator("#expenditure-note")).toContainText(
+    "Fonctionnement du corps (Garmin)",
   );
   await expect(page.locator("#macro-cards .protein .macro-target")).toHaveText(
     "Objectif 135 g",

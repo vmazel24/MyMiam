@@ -30,28 +30,23 @@ def summary(store, user_id, day):
             profile = json.loads(row["goal"])
         row = db.execute("SELECT data FROM garmin_days WHERE user_id=? AND day=?", (user_id, day)).fetchone()
         garmin = json.loads(row[0]) if row else None
-    resting = resting_energy(profile, day, weight[0] if weight else None)
-    projected = round(resting * profile["activity_factor"]) if profile else None
-    expenditure, source = projected, "Estimation du profil"
     target_breakdown = None
     if garmin and garmin["has_data"]:
-        if day < today:
-            expenditure, source = garmin["total"], "Total Garmin"
-            # The complete Garmin total already includes active calories.
-            if profile and garmin.get('active') is not None and 0 <= garmin['active'] <= expenditure:
-                target_breakdown = {'base': expenditure - garmin['active'], 'active': garmin['active'],
+        # Garmin is the sole expenditure source, including for a partial day.
+        # Its total already contains active calories; never add them again.
+        expenditure, source = garmin["total"], "Total Garmin"
+        resting = garmin.get("resting")
+        active = garmin.get("active")
+        if active is not None and 0 <= active <= expenditure:
+            if resting is None:
+                resting = expenditure - active
+            if profile:
+                target_breakdown = {'base': expenditure - active, 'active': active,
                                     'deficit': profile['deficit'], 'base_source': 'Repos Garmin'}
-        else:
-            # Project a full day of rest; add the day's observed active calories
-            # instead of adding them on top of a factor already including activity.
-            # The partial total/resting values must not shrink the 24 h allowance.
-            if resting is not None and garmin.get('active') is not None:
-                expenditure = round(resting + garmin['active'])
-                source = 'Repos estimé sur 24 h + calories actives Garmin'
-                target_breakdown = {'base': resting, 'active': garmin['active'],
-                                    'deficit': profile['deficit'], 'base_source': 'Repos estimé sur 24 h'}
-            else:
-                source = "Projection du profil · calories actives Garmin indisponibles"
+    else:
+        resting = resting_energy(profile, day, weight[0] if weight else None)
+        expenditure = round(resting * profile["activity_factor"]) if profile else None
+        source = "Estimation du profil"
     items = [item for meal in meals for item in meal["items"]]
     intake = totals(items)
     deficit = None if expenditure is None or intake["kcal"] is None or not complete else round(expenditure - intake["kcal"])
