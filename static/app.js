@@ -41,6 +41,9 @@ const state = {
   slotHint: null,
 };
 let toastTimer, integrationTimer, dashboardTimer, previewTimer, captureTimer;
+const appliedCaptures = new Set();
+const captureReads = new Map();
+let dashboardRead = 0;
 let recognition = null,
   dictationStopped = null;
 
@@ -109,6 +112,7 @@ function showLogin() {
   clearInterval(dashboardTimer);
   clearInterval(captureTimer);
   state.jobs = [];
+  appliedCaptures.clear();
   stopDictation();
 }
 async function showApp(user) {
@@ -128,12 +132,8 @@ async function showApp(user) {
   dashboardTimer = setInterval(refreshVisibleDashboard, 60000);
   clearInterval(captureTimer);
   captureTimer = setInterval(() => {
-    if (
-      state.user &&
-      !document.hidden &&
-      state.jobs.some((j) => ["queued", "analysing"].includes(j.status))
-    )
-      loadCaptures(true).catch(globalError);
+    if (state.user && !document.hidden && state.jobs.some(captureLoading))
+      loadCaptures().catch(globalError);
   }, 3000);
 }
 async function loadAll() {
@@ -146,17 +146,28 @@ async function loadAll() {
   ]);
   for (const result of results)
     if (result.status === "rejected") globalError(result.reason);
-  await loadCaptures(true).catch(globalError);
+  await loadCaptures().catch(globalError);
   if (state.view === "trends") await loadTrends().catch(globalError);
 }
 async function loadDashboard() {
-  const selected = state.day;
+  const selected = state.day,
+    user = state.user,
+    read = ++dashboardRead;
   const result = await api(`/api/dashboard?day=${selected}`);
-  if (selected !== state.day || !state.user) return;
+  if (
+    selected !== state.day ||
+    !user ||
+    user !== state.user ||
+    read !== dashboardRead
+  )
+    return false;
   state.summary = result;
   renderDashboard();
   renderMeals();
   await loadDashboardHistory();
+  return (
+    selected === state.day && user === state.user && read === dashboardRead
+  );
 }
 async function loadFavorites() {
   const data = await api("/api/favorites");
@@ -287,7 +298,28 @@ function renderDashboard() {
 function nutrientLine(nutrients = {}) {
   return `<div class="food-nutrients" aria-label="Valeurs pour cette portion">${["kcal", "protein", "carbs", "fat"].map((key) => `<span><strong>${fmt(nutrients[key], key === "kcal" ? 0 : 1)} ${key === "kcal" ? "kcal" : "g"}</strong>${key === "kcal" ? "" : ` ${macroNames[key]}`}</span>`).join("")}</div>`;
 }
+function captureLoading(job) {
+  return (
+    ["queued", "analysing"].includes(job.status) ||
+    (job.status === "done" && !appliedCaptures.has(job.id))
+  );
+}
+function mealAnalysisStatus(meal) {
+  const job = [...state.jobs]
+    .reverse()
+    .find(
+      (j) =>
+        j.reanalysis_meal_ids?.includes(meal.id) && j.status !== "cancelled",
+    );
+  if (!job) return "";
+  if (captureLoading(job))
+    return `<p class="meal-analysis-status" role="status"><span class="loading-spinner" aria-hidden="true"></span>${job.status === "done" ? "Mise à jour du bilan…" : "Luna réanalyse cette saisie…"}</p>`;
+  if (job.status === "failed")
+    return `<p class="review-note" role="status">Réanalyse interrompue : ${escapeHTML(job.error)}. Le repas enregistré est conservé.</p>`;
+  return "";
+}
 function renderMeals() {
+  if (!state.summary || state.summary.day !== state.day) return;
   const meals = [...state.summary.meals].sort(
     (a, b) =>
       Object.keys(slots).indexOf(a.slot) - Object.keys(slots).indexOf(b.slot),
@@ -300,7 +332,7 @@ function renderMeals() {
       )
       .join("");
   const mealMarkup = (m, expanded) =>
-    `<article class="meal-card"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}${m.items.some((i) => i.nutrients.kcal == null) ? `<p class="review-note">Bilan incomplet : ${m.items.filter((i) => i.nutrients.kcal == null).length} aliment(s) sans calories estimées.</p>` : ""}${m.text?.trim().length >= 3 ? `<button class="text-button reanalyse-meal" data-reanalyse-meal="${m.id}" title="Relancer Luna sur le récit d’origine et remplacer son analyse">Réanalyser la saisie ↻</button>` : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
+    `<article class="meal-card" data-meal-id="${m.id}" aria-busy="${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j))}"><div class="meal-symbol" aria-hidden="true">${symbols[m.slot]}</div><div class="meal-info"><h3>${escapeHTML(m.title)}</h3><p>${slots[m.slot]} · ${m.items.length} aliment${m.items.length > 1 ? "s" : ""}${m.items.some((i) => i.estimated) ? " · poids approximatifs" : ""}</p>${expanded ? foodMarkup(m.items) : `<details class="meal-food-details"><summary>Voir les aliments</summary>${foodMarkup(m.items)}</details>`}${m.items.some((i) => i.nutrients.kcal == null) ? `<p class="review-note">Bilan incomplet : ${m.items.filter((i) => i.nutrients.kcal == null).length} aliment(s) sans calories estimées.</p>` : ""}${mealAnalysisStatus(m)}${m.text?.trim().length >= 3 ? `<button class="text-button reanalyse-meal" ${state.jobs.some((j) => j.reanalysis_meal_ids?.includes(m.id) && captureLoading(j)) ? "disabled" : ""} data-reanalyse-meal="${m.id}" title="Relancer Luna sur le récit d’origine et remplacer son analyse">Réanalyser la saisie ↻</button>` : ""}</div><div class="meal-calories">${fmt(m.totals.kcal)} <small>kcal</small></div><div class="meal-actions"><button data-edit="${m.id}" aria-label="Modifier ${escapeHTML(m.title)}" title="Modifier">✎</button><button data-duplicate="${m.id}" aria-label="Réutiliser ${escapeHTML(m.title)}" title="Réutiliser">⧉</button><button data-favorite="${m.id}" aria-label="Garder comme habitude" title="Garder comme habitude">☆</button>${expanded ? `<button data-delete="${m.id}" aria-label="Supprimer ${escapeHTML(m.title)}" title="Supprimer">×</button>` : ""}</div></article>`;
   const refinements = (meal) =>
     (meal.clarifications || [])
       .map(
@@ -322,33 +354,52 @@ function renderMeals() {
   $("today-meals").innerHTML = markup(false);
   $("journal-meals").innerHTML = markup(true);
 }
-async function loadCaptures(refresh = false) {
-  const selected = state.day;
-  const data = await api(`/api/captures?day=${selected}`);
-  if (!state.user || selected !== state.day) return;
-  const completed = new Set(
-    state.jobs.filter((j) => j.status === "done").map((j) => j.id),
-  );
-  const changed = data.jobs.some(
-    (j) => j.status === "done" && !completed.has(j.id),
-  );
-  state.jobs = data.jobs;
-  const markup = data.jobs
-    .filter((j) => ["queued", "analysing", "failed"].includes(j.status))
+// Serialize reads for each account/day so an older response cannot undo a newer status.
+function loadCaptures() {
+  const selected = state.day,
+    user = state.user;
+  if (!user) return Promise.resolve();
+  const key = `${user.id}:${selected}`;
+  const previous = captureReads.get(key) || Promise.resolve();
+  const task = previous
+    .catch(() => {})
+    .then(async () => {
+      if (user !== state.user || selected !== state.day) return;
+      const data = await api(`/api/captures?day=${selected}`);
+      if (user !== state.user || selected !== state.day) return;
+      const changed = data.jobs.filter(
+        (j) => j.status === "done" && !appliedCaptures.has(j.id),
+      );
+      const before = JSON.stringify(state.jobs);
+      state.jobs = data.jobs;
+      renderCaptures();
+      if (before !== JSON.stringify(state.jobs)) renderMeals();
+      if (changed.length && (await loadDashboard())) {
+        for (const job of changed) appliedCaptures.add(job.id);
+        $("global-error").hidden = true;
+        renderCaptures();
+        renderMeals();
+        if (state.view === "trends") await loadTrends();
+        toast("Repas enregistré. Le bilan est à jour.");
+      }
+    });
+  captureReads.set(key, task);
+  const cleanup = () => {
+    if (captureReads.get(key) === task) captureReads.delete(key);
+  };
+  task.then(cleanup, cleanup);
+  return task;
+}
+function renderCaptures() {
+  const markup = state.jobs
+    .filter((j) => captureLoading(j) || j.status === "failed")
     .map(
       (j) =>
-        `<article class="capture-job ${j.status === "failed" ? "failed" : ""}"><div class="capture-job-head"><strong>${j.status === "failed" ? "Ce repas attend un nouvel essai" : j.status === "queued" ? "Repas reçu · en attente" : "Luna analyse ton repas…"}</strong>${j.status !== "failed" ? '<span class="loading-dot" aria-hidden="true"></span>' : ""}</div><p>${escapeHTML(j.status === "failed" ? j.error : j.text)}</p><div class="capture-job-actions">${j.status === "failed" ? `<button class="text-button" data-retry-capture="${j.id}">Réessayer ↗</button>` : ""}<button class="text-button" data-cancel-capture="${j.id}">${j.status === "failed" ? "Retirer cet envoi" : "Annuler"}</button></div></article>`,
+        `<article class="capture-job ${j.status === "failed" ? "failed" : ""}"><div class="capture-job-head" role="status"><strong>${j.status === "failed" ? "Ce repas attend un nouvel essai" : j.status === "done" ? "Mise à jour du bilan…" : j.status === "queued" ? "Repas reçu · en attente" : "Luna analyse ton repas…"}</strong>${j.status !== "failed" ? '<span class="loading-spinner" aria-hidden="true"></span>' : ""}</div><p>${escapeHTML(j.status === "failed" ? j.error : j.text)}</p><div class="capture-job-actions">${j.status === "failed" ? `<button class="text-button" data-retry-capture="${j.id}">Réessayer ↗</button>` : ""}${j.status !== "done" ? `<button class="text-button" data-cancel-capture="${j.id}">${j.status === "failed" ? "Retirer cet envoi" : "Annuler"}</button>` : ""}</div></article>`,
     )
     .join("");
   $("today-captures").innerHTML = markup;
   $("journal-captures").innerHTML = markup;
-  if (refresh && changed) {
-    await loadDashboard();
-    if (state.view === "trends") await loadTrends();
-    toast(
-      "Repas enregistré. Les précisions éventuelles sont dans ton journal.",
-    );
-  }
 }
 function renderFavorites() {
   $("favorite-list").innerHTML =
@@ -384,6 +435,8 @@ function switchView(view) {
     profile: "MES REPÈRES",
   }[view];
   location.hash = view;
+  if (state.user && ["today", "journal"].includes(view))
+    loadCaptures().catch(globalError);
   if (view === "trends") loadTrends().catch(globalError);
   if (view === "profile") loadIntegrations().catch(globalError);
 }
@@ -393,7 +446,7 @@ async function changeDay(day) {
   $("selected-day").value = day;
   $("next-day").disabled = day >= today();
   await loadDashboard().catch(globalError);
-  await loadCaptures(true).catch(globalError);
+  await loadCaptures().catch(globalError);
   if (state.view === "trends") loadTrends().catch(globalError);
 }
 function shiftDay(amount) {
@@ -580,7 +633,8 @@ async function parseMeal() {
   $("meal-dialog").close();
   state.jobs.push({ id: data.id, status: "queued", text, day });
   if (day !== state.day) await changeDay(day);
-  await loadCaptures(true).catch(globalError);
+  else renderCaptures();
+  await loadCaptures().catch(globalError);
   toast("Repas envoyé. Tu peux continuer pendant que Luna l’analyse.");
 }
 const SpeechRecognition =
@@ -718,8 +772,13 @@ if (!SpeechRecognition) {
     "Ce navigateur ne propose pas la dictée intégrée. Utilise Chrome, le micro du clavier du téléphone ou le texte.";
 }
 function refreshVisibleDashboard() {
-  if (state.user && !document.hidden && state.view === "today")
-    Promise.all([loadDashboard(), loadCaptures(true)]).catch(globalError);
+  if (state.user && !document.hidden) {
+    // Refresh captures in the journal too when returning from the phone’s background.
+    (async () => {
+      await loadCaptures();
+      if (["today", "journal"].includes(state.view)) await loadDashboard();
+    })().catch(globalError);
+  }
 }
 document.addEventListener("visibilitychange", refreshVisibleDashboard);
 async function loadDashboardHistory() {
@@ -950,24 +1009,48 @@ document.addEventListener("click", async (event) => {
       toast("Estimation précisée. Le bilan est à jour.");
     }
     if (button.dataset.reanalyseMeal) {
-      await busy(button, () =>
+      const day = state.day,
+        user = state.user;
+      const result = await busy(button, () =>
         api(`/api/meals/${button.dataset.reanalyseMeal}/reanalyse`, {
           method: "POST",
           body: {},
         }),
       );
+      if (!result || user !== state.user || day !== state.day) return;
+      state.jobs = state.jobs.filter((j) => j.id !== result.id);
+      state.jobs.push({
+        ...result,
+        day,
+        status: "queued",
+        text:
+          state.summary.meals.find((m) => m.id === button.dataset.reanalyseMeal)
+            ?.text || "",
+        reanalysis_meal_ids: result.reanalysis_meal_ids || [
+          button.dataset.reanalyseMeal,
+        ],
+      });
+      renderCaptures();
+      renderMeals();
       await loadCaptures();
-      toast(
-        "Réanalyse lancée. L’ancien résultat reste visible jusqu’au remplacement.",
-      );
     }
     if (button.dataset.retryCapture) {
+      const user = state.user,
+        day = state.day;
       await busy(button, () =>
         api(`/api/captures/${button.dataset.retryCapture}/retry`, {
           method: "POST",
           body: {},
         }),
       );
+      if (user !== state.user || day !== state.day) return;
+      const job = state.jobs.find((j) => j.id === button.dataset.retryCapture);
+      if (job) {
+        job.status = "queued";
+        job.error = null;
+      }
+      renderCaptures();
+      renderMeals();
       await loadCaptures();
     }
     if (button.dataset.cancelCapture) {

@@ -405,8 +405,13 @@ def create_app(config=None):
         day = valid_day(request.args.get('day', date.today().isoformat()))
         with store.connect() as db:
             jobs = [dict(row) for row in db.execute(
-                'SELECT id,day,status,meal_id,error,text,created,updated FROM captures WHERE user_id=? AND day=? ORDER BY created',
+                '''SELECT c.id,c.day,c.status,c.meal_id,c.error,c.text,c.created,c.updated,r.originals
+                   FROM captures c LEFT JOIN capture_reanalyses r ON r.capture_id=c.id
+                   WHERE c.user_id=? AND c.day=? ORDER BY c.created''',
                 (g.user['id'], day))]
+        for job in jobs:
+            originals = job.pop('originals')
+            job['reanalysis_meal_ids'] = [meal['id'] for meal in json.loads(originals)] if originals else []
         return jsonify(jobs=jobs)
 
     @app.post("/api/meals/<meal_id>/reanalyse")
@@ -421,11 +426,11 @@ def create_app(config=None):
                 return jsonify(error='Ce repas n’a pas de récit à réanalyser. Tu peux modifier ses aliments.'), 400
             origin = db.execute('SELECT group_id FROM meal_origins WHERE meal_id=?', (meal_id,)).fetchone()
             group_id = origin[0] if origin else 'legacy:' + meal_id
-            active = db.execute('''SELECT c.id FROM captures c JOIN capture_reanalyses r ON r.capture_id=c.id
+            active = db.execute('''SELECT c.id,r.originals FROM captures c JOIN capture_reanalyses r ON r.capture_id=c.id
                 WHERE c.user_id=? AND r.group_id=? AND c.status IN ('queued','analysing')''',
                 (g.user['id'], group_id)).fetchone()
             if active:
-                return jsonify(id=active[0]), 202
+                return jsonify(id=active['id'], reanalysis_meal_ids=[row['id'] for row in json.loads(active['originals'])]), 202
             originals = [dict(row) for row in db.execute('''SELECT m.* FROM meals m JOIN meal_origins o ON o.meal_id=m.id
                 WHERE o.group_id=? AND m.user_id=? ORDER BY m.created,m.id''', (group_id, g.user['id']))] if origin else [dict(meal)]
             scope_slot = None
@@ -448,7 +453,7 @@ def create_app(config=None):
                 time.time(), time.time(), 'reanalyse_' + capture_id, signature))
             db.execute('INSERT INTO capture_reanalyses VALUES (?,?,?,?)',
                        (capture_id, group_id, json.dumps(originals), scope_slot))
-        return jsonify(id=capture_id), 202
+        return jsonify(id=capture_id, reanalysis_meal_ids=[row['id'] for row in originals]), 202
 
     @app.post("/api/captures/<capture_id>/retry")
     def capture_retry(capture_id):

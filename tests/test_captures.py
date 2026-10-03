@@ -201,7 +201,12 @@ class CaptureTests(unittest.TestCase):
         result = self.reanalyse(original)
         self.assertEqual(result.status_code, 202)
         replacement = result.json['id']
-        self.assertEqual(self.reanalyse(original).json['id'], replacement)
+        self.assertEqual(result.json['reanalysis_meal_ids'], [original])
+        self.assertEqual(self.reanalyse(original).json, result.json)
+        jobs = self.client.get('/api/captures?day=' + self.day).json['jobs']
+        pending = next(job for job in jobs if job['id'] == replacement)
+        self.assertEqual(pending['reanalysis_meal_ids'], [original])
+        self.assertNotIn('originals', pending)
         self.assertEqual(summary(self.store, self.user['id'], self.day)['intake']['kcal'], 260)
         self.assertEqual(self.plan.parse.call_count, 1)
         self.plan.parse.return_value['items'][0]['grams'] = 300
@@ -265,8 +270,9 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual({m['slot'] for m in meals}, {'lunch', 'dinner'})
         # Clicking either sibling reanalyses the original capture, not an extra
         # copy of its other period. Even concurrent clicks share the same job.
-        first = self.reanalyse(meals[0]['id']).json['id']
-        self.assertEqual(self.reanalyse(meals[1]['id']).json['id'], first)
+        first = self.reanalyse(meals[0]['id']).json
+        self.assertEqual(set(first['reanalysis_meal_ids']), {m['id'] for m in meals})
+        self.assertEqual(self.reanalyse(meals[1]['id']).json, first)
         self.worker.process_one()
         day = summary(self.store, self.user['id'], self.day)
         self.assertEqual(len(day['meals']), 2)

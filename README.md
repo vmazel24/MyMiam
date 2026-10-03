@@ -101,6 +101,13 @@ la progression et les erreurs, avec réessai ou annulation. Le texte d'un envoi
 échoué reste conservé jusqu'à son retrait. Les envois réussis ou annulés sont
 purgés après 24 heures ; les repas enregistrés restent dans le journal.
 
+**Réanalyser la saisie** relance le récit conservé et remplace son résultat après
+réussite. Les repas concernés affichent un symbole de chargement jusqu’à la mise
+à jour automatique des aliments, des totaux et des graphiques, sur le Dashboard
+comme dans le journal. Le suivi reprend au retour de l’application au premier
+plan. Une lecture du bilan qui échoue est réessayée sans relancer Luna ; une
+réanalyse échouée conserve les anciens repas et affiche l’erreur.
+
 Luna peut proposer jusqu'à deux précisions facultatives de deux ou trois choix.
 Cliquer recalcule les nutriments depuis le catalogue sans nouvel appel IA.
 Les masses explicitement données restent fixes. Une composition non retrouvée

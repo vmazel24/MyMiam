@@ -111,10 +111,11 @@ test.beforeEach(async ({ page }) => {
           text: meals[0].text,
           day: localDay(),
           status: "queued",
+          reanalysis_meal_ids: [meals[0].id],
         },
       ];
       pendingReads = 0;
-      data = { id: "capture-reanalysis" };
+      data = { id: "capture-reanalysis", reanalysis_meal_ids: [meals[0].id] };
     } else if (path.endsWith("/refine")) {
       const option = route.request().postDataJSON().option;
       const grams = [200, 100, 300][option];
@@ -294,6 +295,200 @@ test("existing meal can be reanalysed without retyping or duplicate cards", asyn
     timeout: 10000,
   });
   await expect(page.locator("#today-meals .meal-card")).toHaveCount(1);
+});
+
+async function savedNarrative(page) {
+  await page
+    .getByRole("button", { name: "Ajouter un repas · Soir", exact: true })
+    .click();
+  await page.locator("#meal-text").fill("Ce soir du riz");
+  await page.getByRole("button", { name: "Envoyer à Luna" }).click();
+  await expect(page.locator("#intake-kcal")).toContainText("260", {
+    timeout: 10000,
+  });
+  return page.evaluate(async () =>
+    (
+      await fetch(
+        "/api/dashboard?day=" + document.getElementById("selected-day").value,
+      )
+    ).json(),
+  );
+}
+async function reanalysisRoutes(page, baseline, options = {}) {
+  let status = options.status || "queued",
+    failures = options.failures || 0,
+    started = false;
+  const job = {
+    id: "live-reanalysis",
+    day: localDay(),
+    text: "Ce soir du riz",
+    reanalysis_meal_ids: [baseline.meals[0].id],
+  };
+  const meal = structuredClone(baseline.meals[0]);
+  meal.id = "replacement-meal";
+  meal.title = "Repas réanalysé";
+  meal.totals = { ...meal.totals, kcal: 390 };
+  meal.items[0].nutrients = meal.totals;
+  const updated = { ...baseline, meals: [meal], intake: meal.totals };
+  await page.route("**/api/meals/*/reanalyse", (route) => {
+    started = true;
+    return route.fulfill({
+      json: { id: job.id, reanalysis_meal_ids: job.reanalysis_meal_ids },
+      status: 202,
+    });
+  });
+  await page.route("**/api/captures?**", (route) =>
+    route.fulfill({
+      json: {
+        jobs: started
+          ? [
+              {
+                ...job,
+                status,
+                error:
+                  status === "failed"
+                    ? "Service momentanément indisponible"
+                    : null,
+              },
+            ]
+          : [],
+      },
+    }),
+  );
+  await page.route("**/api/dashboard?**", (route) => {
+    if (started && status === "done" && failures-- > 0)
+      return route.fulfill({
+        status: 503,
+        json: { error: "Bilan temporairement indisponible" },
+      });
+    return route.fulfill({
+      json: started && status === "done" ? updated : baseline,
+    });
+  });
+  await page.route("**/api/captures/*/retry", (route) => {
+    status = "queued";
+    return route.fulfill({ json: { ok: true } });
+  });
+  return (value) => {
+    status = value;
+  };
+}
+test("reanalysis already finished on the first status read refreshes calories immediately", async ({
+  page,
+}) => {
+  const baseline = await savedNarrative(page);
+  await reanalysisRoutes(page, baseline, { status: "done" });
+  await page
+    .locator("#today-meals")
+    .getByRole("button", { name: "Réanalyser la saisie" })
+    .click();
+  await expect(page.locator("#intake-kcal")).toContainText("390");
+  await expect(page.locator("#today-meals")).toContainText("Repas réanalysé");
+  await expect(page.locator("#today-meals .meal-card")).toHaveCount(1);
+  await expect(page.locator("#today-captures .capture-job")).toHaveCount(0);
+});
+test("journal shows a persistent meal spinner and refreshes on return from background", async ({
+  page,
+}) => {
+  const baseline = await savedNarrative(page);
+  const setStatus = await reanalysisRoutes(page, baseline);
+  await page
+    .getByRole("button", { name: "Journal des repas", exact: true })
+    .click();
+  await page
+    .locator("#journal-meals")
+    .getByRole("button", { name: "Réanalyser la saisie" })
+    .click();
+  await expect(
+    page.locator("#journal-meals .meal-analysis-status .loading-spinner"),
+  ).toBeVisible();
+  await expect(page.locator("#journal-meals .meal-card")).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  await expect(
+    page
+      .locator("#journal-meals")
+      .getByRole("button", { name: "Réanalyser la saisie" }),
+  ).toBeDisabled();
+  await expect(page.locator("#journal-meals .meal-calories")).toContainText(
+    "260",
+  );
+  await page.evaluate(() =>
+    Object.defineProperty(document, "hidden", {
+      value: true,
+      writable: true,
+      configurable: true,
+    }),
+  );
+  setStatus("done");
+  await page.evaluate(() => {
+    document.hidden = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(page.locator("#journal-meals .meal-calories")).toContainText(
+    "390",
+  );
+  await expect(page.locator("#journal-meals .loading-spinner")).toHaveCount(0);
+  await expect(page.locator("#journal-meals .meal-card")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await expect(page.locator("#intake-kcal")).toContainText("390");
+});
+test("a failed balance refresh is retried automatically after processing finishes", async ({
+  page,
+}) => {
+  const baseline = await savedNarrative(page);
+  await reanalysisRoutes(page, baseline, { status: "done", failures: 1 });
+  await page
+    .locator("#today-meals")
+    .getByRole("button", { name: "Réanalyser la saisie" })
+    .click();
+  await expect(page.locator("#global-error")).toContainText(
+    "Bilan temporairement indisponible",
+  );
+  await expect(
+    page.locator("#today-meals .meal-analysis-status .loading-spinner"),
+  ).toBeVisible();
+  await expect(page.locator("#intake-kcal")).toContainText("390", {
+    timeout: 10000,
+  });
+  await expect(page.locator("#today-meals .loading-spinner")).toHaveCount(0);
+  await expect(page.locator("#global-error")).not.toBeVisible();
+});
+test("a failed reanalysis keeps the saved meal and can be retried with live progress", async ({
+  page,
+}) => {
+  const baseline = await savedNarrative(page);
+  const setStatus = await reanalysisRoutes(page, baseline);
+  await page
+    .locator("#today-meals")
+    .getByRole("button", { name: "Réanalyser la saisie" })
+    .click();
+  await expect(page.locator("#today-meals .loading-spinner")).toBeVisible();
+  setStatus("failed");
+  await expect(page.locator("#today-meals")).toContainText(
+    "Réanalyse interrompue",
+    { timeout: 10000 },
+  );
+  await expect(page.locator("#today-meals .loading-spinner")).toHaveCount(0);
+  await expect(page.locator("#intake-kcal")).toContainText("260");
+  await expect(
+    page
+      .locator("#today-meals")
+      .getByRole("button", { name: "Réanalyser la saisie" }),
+  ).toBeEnabled();
+  await page
+    .locator("#today-captures")
+    .getByRole("button", { name: "Réessayer" })
+    .click();
+  await expect(page.locator("#today-meals .loading-spinner")).toBeVisible();
+  setStatus("done");
+  await expect(page.locator("#intake-kcal")).toContainText("390", {
+    timeout: 10000,
+  });
+  await expect(page.locator("#today-meals .loading-spinner")).toHaveCount(0);
 });
 
 async function fakeSpeech(page, error = null) {
