@@ -420,11 +420,34 @@ function renderDashboard() {
       const value = logged ? s.intake[key] : null,
         bounds = logged ? s.intake_bounds?.[key] : null,
         target = s.targets?.[key],
+        coverage = logged ? s.nutrition_coverage?.[key] : null,
         pct =
-          target && (value != null || bounds)
-            ? Math.min(100, ((value ?? bounds.lower) / target) * 100)
-            : 0;
-      return `<article class="macro-card ${key}"><div class="macro-top">${name}</div><div class="macro-number">${coveredValue({ [key]: value }, { [key]: bounds }, s.nutrition_coverage, key)} <small>g</small></div>${bounds ? '<p class="footnote">Plage calculée depuis les limites de la source.</p>' : s.nutrition_coverage?.[key]?.missing_items ? '<p class="footnote">Sous-total connu · bilan partiel.</p>' : ""}<p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${pct}" height="4" rx="2"></rect></svg></article>`;
+          target > 0 && (value != null || bounds || coverage?.known_items > 0)
+            ? ((value ?? bounds?.lower ?? coverage.known) / target) * 100
+            : null,
+        percent =
+          target > 0
+            ? coveredValue(
+                { [key]: value == null ? null : (value / target) * 100 },
+                {
+                  [key]: bounds
+                    ? {
+                        ...bounds,
+                        lower: (bounds.lower / target) * 100,
+                        upper: (bounds.upper / target) * 100,
+                      }
+                    : null,
+                },
+                {
+                  [key]: coverage
+                    ? { ...coverage, known: (coverage.known / target) * 100 }
+                    : null,
+                },
+                key,
+                0,
+              )
+            : "—";
+      return `<article class="macro-card ${key}"><div class="macro-top">${name}<span class="macro-chip" title="Part de l’objectif quotidien atteinte" aria-label="${name} : ${escapeHTML(percent)} % de l’objectif quotidien">${percent} %</span></div><div class="macro-number">${coveredValue({ [key]: value }, { [key]: bounds }, s.nutrition_coverage, key)} <small>g</small></div>${bounds ? '<p class="footnote">Plage calculée depuis les limites de la source.</p>' : s.nutrition_coverage?.[key]?.missing_items ? '<p class="footnote">Sous-total connu · bilan partiel.</p>' : ""}<p class="macro-target">${target == null ? "Objectif à définir" : `Objectif ${fmt(target)} g`}</p><svg class="macro-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-label="Progression ${name}"><rect width="${Math.min(100, Math.max(0, pct ?? 0))}" height="4" rx="2"></rect></svg></article>`;
     })
     .join("");
   $("garmin-day").innerHTML = ga?.has_data

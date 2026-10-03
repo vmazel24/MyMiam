@@ -1724,6 +1724,11 @@ dialog::backdrop {
 .compact-macros .macro-card {
   padding: 14px 16px;
 }
+.compact-macros .macro-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
 .compact-macros .macro-number {
   font-size: 29px;
   margin: 8px 0 4px;
