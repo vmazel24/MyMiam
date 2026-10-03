@@ -856,7 +856,7 @@ test("Garmin expenditure is distinct from unlogged food calories", async ({
     (await page.locator("#expenditure-value").textContent()).replace(/\s/g, ""),
   ).toBe("2700kcal");
   await expect(page.locator("#expenditure-label")).toContainText(
-    "dépensé jusqu’ici",
+    "dépense à ce stade",
   );
   await expect(page.locator("#energy-caption")).toContainText(
     "Aucun repas saisi",
@@ -1218,7 +1218,14 @@ test("active Garmin calories update the goal ratio gauge and overshoot after ref
     "400 kcal jusqu’à ton objectif.",
   );
   await expect(page.locator(".energy-card")).not.toHaveClass(/is-over-goal/);
-  await expect(page.locator("#expenditure-value")).toHaveText(/1\s050 kcal/);
+  await expect(page.locator("#expenditure-value")).toHaveText(/2\s900 kcal/);
+  await expect(page.locator("#expenditure-label")).toHaveText(
+    "Dépense projetée sur 24 h",
+  );
+  await expect(page.locator("#garmin-day")).toContainText(/1\s050/);
+  await expect(page.locator("#garmin-day")).toContainText(
+    "Fonctionnement du corps · Garmin",
+  );
   await expect(page.locator("#expenditure-note")).toContainText(
     /2\s300 \+ 600 kcal actives − 200/,
   );

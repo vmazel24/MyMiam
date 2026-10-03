@@ -200,6 +200,12 @@ un éventuel adaptateur MCP local pourrait réutiliser leur logique ultérieurem
   disponibles, l'estimation habituelle du profil reste le repli. Le détail du
   calcul est affiché sous le compteur, et chaque synchronisation actualise
   l'objectif, les macros, la jauge et le bilan provisoire.
+  Le bilan affiche la dépense utilisée dans le calcul de l'objectif ; la carte
+  Garmin distingue son total, ses calories actives et l'estimation des calories
+  de fonctionnement du corps sur la période écoulée. Garmin estime ces dernières
+  depuis son profil, avec une marge pour les mouvements légers ; elles diffèrent
+  de la projection MyMiam sur 24 h.
+  [Définition Garmin](https://support.garmin.com/en-CA/?faq=lkl4cwCLlK7ox362uGQEV7).
 - Le déficit est signé (`dépense − apports`) ; les surplus réduisent le cumul.
   Le cumul porte automatiquement sur les jours passés avec au moins un repas
   et une énergie calculable. Aucune confirmation de journée n'est nécessaire.
