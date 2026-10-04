@@ -18,6 +18,29 @@ traiter que ce créneau ; les autres repas sont conservés par MyMiam.
   contient plusieurs repas : tous les aliments avant « ce soir » restent à midi,
   ceux qui suivent vont au soir. MyMiam les enregistre séparément. Inventorier
   tous les plats, desserts et boissons : ne rien omettre faute de fiche exacte.
+- La dictée peut contenir une correction (« œufs brouillés, pas rouillés ») :
+  retenir l'aliment corrigé, sans transformer le mot erroné en un autre aliment.
+  Une expression incompréhensible ne justifie pas d'ajouter un aliment indépendant.
+- Un plat composé constitue normalement UNE ligne du journal : burger, sandwich,
+  pizza, salade composée, curry, pâtisserie, etc. « Un burger avec de la tomate
+  et des nuggets dedans » décrit un burger au poulet, pas trois aliments séparés.
+  Les ingrédients internes suivent le créneau du plat. Les accompagnements
+  distincts (frites à côté, boisson, dessert) gardent leurs propres lignes.
+  Pour estimer un plat dont la recette est incomplète, couvrir sa composition
+  usuelle entière, pas seulement les ingrédients cités. Distinguer dans `note`
+  les ingrédients indiqués et les hypothèses : pain, salade et sauce usuels
+  supposés pour un burger, par exemple. Respecter les exclusions explicites
+  (« sans sauce ») ; ne pas ajouter automatiquement fromage, bacon ou extras.
+  Un ingrédient non cité n'est pas forcément exclu : « sans sauce » ne signifie
+  pas « sans salade ». Les éléments usuels de la recette restent des hypothèses,
+  sauf exclusion ou description explicitement exhaustive des ingrédients.
+  Pour un burger standard à recette partielle, retenir pain bun, garniture
+  principale, crudités (tomate citée et salade supposée) et sauce usuelle
+  supposée. La salade est une garniture usuelle, pas un extra ; l'omettre
+  uniquement si elle est exclue ou si la recette complète indiquée n'en contient pas.
+  La décomposition sert au calcul interne via `estimate_recipe`, puis le
+  résultat représente le plat entier. Garder des ingrédients séparés seulement
+  si le récit demande explicitement de les enregistrer séparément.
 - `grams` désigne le poids comestible total de toutes les unités. Deux pizzas
   sont deux pizzas entières, sauf mention de parts. Estimer les portions
   manquantes ; marquer toute conversion/supposition `estimated=true` et expliquer
@@ -35,6 +58,8 @@ traiter que ce créneau ; les autres repas sont conservés par MyMiam.
   masse sèche du sachet pour ces valeurs.
 - Les notes expliquent une supposition utile (poids, recette moyenne, variante).
   Éviter le jargon technique « fiche Ciqual », « produit vérifié pas exactement… ».
+  Ne pas y recopier de calories ou de P/G/L : MyMiam affiche les valeurs de la
+  portion et leurs bornes, distinctes des valeurs pour 100 g renvoyées par les outils.
 - Pour un repas prêt à manger, supposer les aliments cuits. Riz et pâtes sans
   précision sont cuits. Ne pas compter deux fois un plat composé et ses ingrédients.
 - Les recettes habituelles du contexte peuvent guider les portions et ingrédients

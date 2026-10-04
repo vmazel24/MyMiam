@@ -209,7 +209,7 @@ class ChatGPTPlan:
             except (PlanError, ValueError, requests.RequestException):
                 return {'found': False, 'exact_match': False,
                         'note': 'La source externe n’a pas pu être vérifiée ; conserver une approximation visible.'}
-        nutrition = NutritionTools(self.store or Store(self.directory), researcher=research_public)
+        nutrition = NutritionTools(self.store or Store(self.directory), researcher=research_public, narrative=text)
         payload['tools'] = TOOLS
         payload['tool_choice'] = 'required'
         payload['include'] = ['reasoning.encrypted_content']
@@ -290,9 +290,12 @@ class ChatGPTPlan:
                     trace('repairing', missing=missing)
                     payload['input'].extend(output)
                     payload['input'].append({'role': 'developer', 'content':
-                        'Contrôle nutritionnel : ces aliments ont des valeurs absentes ou une préparation incompatible : '
+                        'Contrôle nutritionnel : ces aliments ont des valeurs absentes, une préparation incompatible ou un plat incomplet : '
                         + json.dumps(missing, ensure_ascii=False) +
-                        '. Conserver tous les aliments et créneaux. Pour un aliment identifiable, chercher '
+                        '. Conserver tous les plats, accompagnements et créneaux. Regrouper les ingrédients '
+                        'internes en une seule ligne du plat composé, sans doublon ; inclure ses composants '
+                        'usuels manquants en signalant les hypothèses et respecter les exclusions. '
+                        'Pour un aliment identifiable, chercher '
                         'un synonyme ou un comparable cohérent ; sinon rechercher ses ingrédients puis utiliser '
                         'nutrition.estimate_recipe pour une composition estimée, avec poids final et hypothèses. '
                         'Ne pas inventer de chiffres ni poser de questions. Une vraie composition impossible à '
@@ -302,10 +305,12 @@ class ChatGPTPlan:
                 # A rejected preparation must not retain plausible-looking
                 # numbers for another cooking state after the bounded repair.
                 for issue in missing:
-                    if issue.get('kind') == 'preparation':
+                    if issue.get('kind') in ('preparation', 'dish'):
                         item = draft['items'][issue['item_index']]
                         item['food_id'] = None
-                        item['note'] = 'Estimation de la cuisson à compléter ; les valeurs du produit cru ne sont pas utilisées.'
+                        item['note'] = ('Estimation du plat entier à compléter ; les valeurs d’un ingrédient seul ne sont pas utilisées.'
+                                        if issue['kind'] == 'dish' else
+                                        'Estimation de la cuisson à compléter ; les valeurs du produit cru ne sont pas utilisées.')
                         draft['clarifications'] = [group for group in draft.get('clarifications', [])
                             if group.get('item_index') != issue['item_index']]
                 trace('partial' if missing else 'done', missing=missing, draft=draft,

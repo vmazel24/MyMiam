@@ -1,8 +1,9 @@
 """Bounded nutrition tools, with internal catalogue before public research."""
 import requests
+import re
 from curl_cffi.requests.exceptions import RequestException as BrowserRequestError
 
-from .catalogue import matches_for
+from .catalogue import matches_for, dish_family
 from .nutrition import finite_number, NUTRIENTS, totals, search_foods, nutrient_bounds, normalize
 from .references import lookup_reference, identity_key, recipe_from_components, reference_food, estimate_from_components
 from .food_research import import_product
@@ -18,7 +19,7 @@ TOOLS = [{'type': 'namespace', 'name': 'nutrition',
           'description': 'Catalogue personnel prioritaire, Ciqual, recherche publique et calculs nutritionnels.',
           'tools': [
               {'type': 'function', 'name': 'search_foods', 'strict': True,
-               'description': 'Recherche interne groupée. Extraire obligatoirement la marque et le restaurant/ville nommés dans le récit. Une référence nommée absente doit passer par research_food avant toute substitution générique.',
+               'description': 'Recherche interne groupée. Pour un plat composé, rechercher le plat entier et sa variante avant ses ingrédients. Extraire obligatoirement la marque et le restaurant/ville nommés dans le récit. Une référence nommée absente doit passer par research_food avant toute substitution générique.',
                'parameters': object_schema({'queries': {'type': 'array', 'items': object_schema({
                    'label': {'type': 'string'}, 'brand': {'type': ['string', 'null']},
                    'restaurant': {'type': ['string', 'null']}, 'city': {'type': ['string', 'null']}})}})},
@@ -34,7 +35,7 @@ TOOLS = [{'type': 'namespace', 'name': 'nutrition',
                'parameters': object_schema({'query': {'type': 'string'}, 'components': {'type': 'array', 'items': object_schema({
                    'food_id': {'type': 'string'}, 'grams': {'type': 'number'}})}, 'note': {'type': 'string'}})},
               {'type': 'function', 'name': 'estimate_recipe', 'strict': True,
-               'description': 'Estime un plat absent du catalogue à partir de composants déjà recherchés, sans inventer de nutriments. Utiliser des masses comestibles, préciser les hypothèses et le poids final après cuisson. Ne crée jamais un alias exact de marque ou restaurant. Réutiliser le food_id retourné pour le plat entier.',
+               'description': 'Estime un plat entier à partir de tous ses composants déjà recherchés, sans inventer de nutriments. Inclure sa base, sa garniture et les sauces/matières grasses pertinentes, en distinguant ingrédients cités et supposés. Respecter les exclusions ; garder les accompagnements hors de la recette. Utiliser des masses comestibles et le poids final après cuisson. Ne crée jamais un alias exact de marque ou restaurant. Réutiliser le food_id retourné pour une seule ligne du plat entier, sans ajouter ses composants au journal.',
                'parameters': object_schema({'label': {'type': 'string'},
                    'components': {'type': 'array', 'items': object_schema({
                        'food_id': {'type': 'string'}, 'grams': {'type': 'number'},
@@ -44,7 +45,7 @@ TOOLS = [{'type': 'namespace', 'name': 'nutrition',
 
 
 class NutritionTools:
-    def __init__(self, store, researcher=None):
+    def __init__(self, store, researcher=None, narrative=''):
         self.store = store
         self.found = {}
         self.calls = []
@@ -57,6 +58,7 @@ class NutritionTools:
         self.audit = []
         self.estimated_count = 0
         self.relaxed_ids = set()
+        self.narrative = normalize(narrative)
 
     @staticmethod
     def public_food(food):
@@ -111,6 +113,9 @@ class NutritionTools:
                     raise ValueError('Recherche invalide')
                 reference = lookup_reference(self.store, query)
                 direct = [] if reference else search_foods(self.store, query, 5)
+                family = dish_family(label if isinstance(value, dict) else query)
+                if family:
+                    direct = [food for food in direct if dish_family(food['name']) == family]
                 foods = [reference] if reference else direct or matches_for(self.store, label if isinstance(value, dict) else query)
                 if not reference:
                     with self.store.connect() as db:
@@ -263,6 +268,38 @@ class NutritionTools:
             words = set(normalize(item.get('label', '')).split())
             name = normalize(food['name'])
             reference = food.get('reference', {})
+            family = dish_family(item.get('label', ''))
+            if family and reference.get('kind') not in ('recipe', 'estimate') and dish_family(food['name']) != family:
+                issues.append({'item_index': index, 'label': item.get('label'), 'kind': 'dish',
+                    'reason': 'La référence sélectionnée est un ingrédient isolé, pas le plat entier. '
+                              'Chercher une référence complète comparable ou reconstituer toute la recette '
+                              'avec estimate_recipe, sans enregistrer ses ingrédients séparément.'})
+            # A verified restaurant recipe is authoritative about ingredients.
+            # A generic homemade estimate must follow the default recipe chosen
+            # in the capture skill, unless the user excludes ingredients or
+            # supplies an exhaustive recipe. Whole-dish averages already cover
+            # their composition and must not have ingredients added on top.
+            components = reference.get('components', [])
+            exhaustive = re.search(r'\b(?:composee? (?:uniquement|seulement)|avec (?:uniquement|seulement)|'
+                                   r'rien d autre dedans|pas d autres? ingredients|recette complete|liste complete)\b',
+                                   self.narrative)
+            if family == 'burger' and reference.get('kind') == 'estimate' and not exhaustive and not any(
+                    dish_family(part['name']) == 'burger' for part in components):
+                component_words = set(' '.join(normalize(part['name']) for part in components).split())
+                defaults = [('pain/bun', {'pain', 'bun'}, ('pain', 'bun')),
+                            ('salade usuelle supposée', {'salade', 'laitue', 'roquette'}, ('salade', 'laitue', 'crudites')),
+                            ('sauce usuelle supposée', {'sauce', 'mayonnaise', 'ketchup', 'moutarde'}, ('sauce',))]
+                missing_parts = []
+                for description, alternatives, exclusions in defaults:
+                    excluded = any(re.search(r'\b(?:sans|pas de|pas du|ni) (?:la |le |de |du |aucune? )?' + term + r'\b',
+                                   self.narrative or normalize(item.get('label', ''))) for term in exclusions)
+                    if not excluded and not component_words & alternatives:
+                        missing_parts.append(description)
+                if missing_parts:
+                    issues.append({'item_index':index, 'label':item.get('label'), 'kind':'dish',
+                        'reason':'Recette-type de burger incomplète : ' + ', '.join(missing_parts) +
+                                 '. Ces ingrédients non cités ne sont pas exclus. Rechercher leurs références puis '
+                                 'recalculer le plat entier avec estimate_recipe ; signaler les ingrédients supposés dans note.'})
             fried = bool(words & {'frit', 'frite', 'frits', 'frites', 'fried'})
             fat_in_recipe = any(any(w in normalize(part['name']).split()
                 for w in ('huile', 'beurre', 'graisse', 'margarine')) for part in reference.get('components', []))

@@ -163,6 +163,145 @@ class NutritionToolTests(unittest.TestCase):
                     (food_id, name, normalize(name), 'Ciqual', json.dumps(dict(zip(
                         ('kcal','protein','carbs','fat','fiber'), values))), '{}'))
 
+    def add_burger_foods(self):
+        with self.store.connect() as db:
+            for food_id, name, values in [
+                ('burger-chicken', 'Burger au poulet, de restauration rapide', [249, 12.7, 23.8, 11, 1.2]),
+                ('burger-fish', 'Burger au poisson', [263, 12.2, 26.7, 11.5, 1]),
+                ('bun', 'Pain pour burger ou hot dog (bun), préemballé', [283, 8.21, 47.2, 4.9, 3.5]),
+                ('nuggets', 'Nuggets de poulet', [250, 15, 16, 14, 1]),
+                ('tomato', 'Tomate crue', [18, 1, 3, 0.2, 1]),
+                ('lettuce', 'Salade verte crue', [15, 1, 1, 0.2, 1]),
+                ('sauce', 'Sauce burger, préemballée', [427, 1.28, 13.2, 40.4, 0.58]),
+                ('fries', 'Frites de pommes de terre cuites', [258, 4, 35, 11, 3]),
+            ]:
+                db.execute('INSERT INTO foods VALUES (?,?,?,?,?,?)',
+                    (food_id, name, normalize(name), 'Ciqual', json.dumps(dict(zip(
+                        ('kcal','protein','carbs','fat','fiber'), values))), '{}'))
+
+    def test_whole_burger_search_preserves_chicken_variant_and_excludes_bun_and_sauce(self):
+        self.add_burger_foods()
+        result = self.tools.execute('search_foods', {'queries': [
+            'hamburger avec tomate et nuggets de poulet', 'burger', 'pain pour burger']})['results']
+        self.assertEqual([food['food_id'] for food in result[0]['foods']], ['burger-chicken'])
+        self.assertTrue(result[0]['relaxed_search'])
+        self.assertFalse(result[0]['reference_match'])
+        self.assertEqual({food['food_id'] for food in result[1]['foods']}, {'burger-chicken', 'burger-fish'})
+        self.assertEqual(result[2]['foods'][0]['food_id'], 'bun')
+        draft = {'items':[{'food_id':'burger-chicken', 'label':'Burger aux nuggets et tomate', 'grams':250}]}
+        self.tools.validate_selection(draft)
+        self.assertTrue(draft['items'][0]['composition_estimated'])
+        self.assertEqual(self.tools.selection_issues(draft), [])
+
+    def test_hamburger_bread_search_returns_bun_without_losing_explicit_exclusions(self):
+        self.add_burger_foods()
+        result = self.tools.execute('search_foods', {'queries':[
+            'pain hamburger', 'pain burger brioché', 'pain hamburger sans gluten']})['results']
+        for value in result[:2]:
+            self.assertEqual([food['food_id'] for food in value['foods']], ['bun'])
+            self.assertTrue(value['relaxed_search'])
+        self.assertEqual(result[2]['foods'], [])
+
+    def test_burger_search_does_not_erase_exclusions_or_conflicting_proteins(self):
+        self.add_burger_foods()
+        for label in ('burger poulet sans sauce', 'burger végétarien aux nuggets de poulet',
+                      'burger poulet et poisson', 'burger au tofu'):
+            with self.subTest(label=label):
+                result = self.tools.execute('search_foods', {'queries':[label]})['results'][0]
+                self.assertEqual(result['foods'], [])
+                self.assertTrue(result['estimation_needed'])
+
+    def test_composed_dish_cannot_use_only_the_nutrients_of_an_isolated_ingredient(self):
+        self.add_burger_foods()
+        self.tools.execute('search_foods', {'queries':['nuggets', 'pain pour burger', 'tomate', 'frites']})
+        for label, food_id in [('Burger au poulet', 'nuggets'), ('Sandwich tomate', 'bun'),
+                               ('Wrap au poulet', 'nuggets'), ('Pizza à la tomate', 'tomato')]:
+            with self.subTest(label=label):
+                issues = self.tools.selection_issues({'items':[{'label':label, 'food_id':food_id}]})
+                self.assertEqual(issues[0]['kind'], 'dish')
+        self.assertEqual(self.tools.selection_issues({'items':[
+            {'label':'Nuggets de poulet', 'food_id':'nuggets'},
+            {'label':'Frites', 'food_id':'fries'}]}), [])
+
+    def test_complete_burger_recipe_is_one_item_and_keeps_fries_as_a_side(self):
+        self.add_burger_foods()
+        self.tools.execute('search_foods', {'queries':[
+            'pain pour burger', 'nuggets', 'tomate', 'salade verte', 'sauce burger', 'frites']})
+        components = [{'food_id':food_id, 'ingredient':ingredient, 'grams':grams}
+            for food_id, ingredient, grams in [('bun','pain pour burger',80), ('nuggets','nuggets de poulet',80),
+                ('tomato','tomate crue',30), ('lettuce','salade verte',10), ('sauce','sauce burger',20)]]
+        food = self.tools.execute('estimate_recipe', {'label':'Burger aux nuggets et tomate',
+            'components':components, 'prepared_grams':220,
+            'note':'Nuggets et tomate cités ; pain, salade et sauce usuels supposés.'})['food']
+        draft = {'title':'Burger et frites', 'slot':'lunch', 'items':[
+            {'label':'Burger aux nuggets et tomate', 'food_id':food['food_id'], 'grams':220,
+             'slot':'lunch', 'estimated':True},
+            {'label':'Frites', 'food_id':'fries', 'grams':120, 'slot':'lunch', 'estimated':True}],
+            'clarifications':[]}
+        self.tools.validate_selection(draft)
+        self.assertEqual(self.tools.selection_issues(draft), [])
+        items = resolve_items(self.store, prepare_draft(self.store, draft)['items'])
+        self.assertEqual(len(items), 2)
+        self.assertAlmostEqual(items[0]['nutrients']['kcal'], 518.7, delta=0.01)
+        self.assertAlmostEqual(items[1]['nutrients']['kcal'], 309.6)
+        self.assertTrue(all(item['nutrients'][key] is not None
+            for item in items for key in ('kcal','protein','carbs','fat')))
+        self.assertIn('supposés', items[0]['note'])
+
+    def test_dish_using_nugget_reference_gets_repaired_to_a_whole_burger(self):
+        self.add_burger_foods()
+        initial = {'title':'Burger et frites', 'slot':'lunch', 'items':[
+            {'label':'Burger aux nuggets et tomate', 'food_id':'nuggets', 'grams':250,
+             'slot':'lunch', 'estimated':True, 'note':'Portion supposée'},
+            {'label':'Frites', 'food_id':'fries', 'grams':120,
+             'slot':'lunch', 'estimated':True, 'note':'Petite barquette'}], 'clarifications':[]}
+        final = json.loads(json.dumps(initial))
+        final['items'][0].update(food_id='burger-chicken',
+            note='Burger entier moyen ; pain, salade et sauce usuels supposés.')
+        responses = [self.stream([self.call(args={'queries':['nuggets', 'frites']})]),
+            self.stream(text=initial),
+            self.stream([self.call(args={'queries':['burger au poulet']})]),
+            self.stream(text=final)]
+        with patch('mymiam.openai_plan.requests.post', side_effect=responses):
+            result = self.plan.parse('À midi un burger avec tomate et nuggets dedans, et des frites à côté.', [])
+        self.assertEqual(len(result['items']), 2)
+        self.assertEqual(result['items'][0]['food_id'], 'burger-chicken')
+        self.assertTrue(all(item['slot'] == 'lunch' for item in result['items']))
+        trace = json.loads(next((self.store.directory/'analysis_traces').glob('*.json')).read_text())
+        self.assertTrue(trace['repair_requested'])
+        self.assertEqual(trace['status'], 'done')
+
+    def test_partial_burger_recipe_requests_usual_ingredients_but_respects_user_exclusions(self):
+        self.add_burger_foods()
+        self.tools.execute('search_foods', {'queries':['pain pour burger','nuggets','tomate']})
+        food = self.tools.execute('estimate_recipe', {'label':'Burger aux nuggets et tomate',
+            'components':[{'food_id':'bun','ingredient':'pain pour burger','grams':80},
+                          {'food_id':'nuggets','ingredient':'nuggets de poulet','grams':80},
+                          {'food_id':'tomato','ingredient':'tomate crue','grams':30}],
+            'prepared_grams':190,'note':'Bun supposé, nuggets et tomate cités.'})['food']
+        draft = {'items':[{'food_id':food['food_id'],'label':'Burger aux nuggets et tomate','grams':190}]}
+        scenarios = [
+            ('À midi un burger aux nuggets et tomate.', ['salade', 'sauce']),
+            ('À midi seulement un burger aux nuggets et tomate.', ['salade', 'sauce']),
+            ('À midi un burger aux nuggets et tomate, sans sauce.', ['salade']),
+            ('À midi un burger aux nuggets et tomate, sans salade ni sauce.', []),
+            ('À midi un burger composé uniquement de bun, nuggets et tomate.', []),
+        ]
+        for narrative, missing in scenarios:
+            with self.subTest(narrative=narrative):
+                tools = NutritionTools(self.store, narrative=narrative)
+                tools.found = self.tools.found
+                issues = tools.selection_issues(draft)
+                if missing:
+                    self.assertEqual(issues[0]['kind'], 'dish')
+                    for part in missing: self.assertIn(part, issues[0]['reason'])
+                    if 'sauce' not in missing: self.assertNotIn('sauce usuelle', issues[0]['reason'])
+                else:
+                    self.assertEqual(issues, [])
+        # Published restaurant ingredients do not acquire invented additions.
+        self.tools.found[food['food_id']]['reference']['kind'] = 'recipe'
+        self.assertEqual(self.tools.selection_issues(draft), [])
+
     def test_estimated_recipe_uses_seen_components_final_cooked_mass_and_no_exact_alias(self):
         self.add_ingredients()
         self.tools.execute('search_foods', {'queries': ['concombre', 'huile']})

@@ -6,6 +6,21 @@ description: "Réutiliser le catalogue MyMiam, vérifier les références nommé
 # Catalogue interne avant recherche externe
 
 Appeler `nutrition.search_foods` avant la fiche finale, en groupant les aliments.
+Pour un plat composé, rechercher d'abord le PLAT ENTIER avec sa variante principale,
+par exemple « burger au poulet » pour un burger aux nuggets et tomate. Ne pas
+chercher seulement ses ingrédients puis les enregistrer comme plusieurs plats.
+Privilégier une référence complète comparable si elle représente raisonnablement
+la recette, en précisant qu'il s'agit d'une composition moyenne. Si la recette
+explicitée ou une exclusion rend cette référence incompatible, reconstruire le
+plat entier avec `estimate_recipe`. Une recette estimée doit inclure sa base,
+sa garniture et les matières grasses/sauces usuelles pertinentes ; indiquer ce
+qui est supposé, respecter les ingrédients exclus et garder les accompagnements
+hors de la recette. Une liste partielle d'ingrédients n'est pas une recette complète.
+Ne pas confondre « aucune sauce » et « aucune autre garniture » : dans une
+recette-type de burger, la salade reste supposée sauf exclusion explicite.
+Pour la base d'un burger, rechercher « pain pour burger » ou « bun » avant de
+substituer du pain blanc ordinaire. Réessayer un nom simple de l'ingrédient
+avant d'y ajouter des qualificatifs absents des fiches (« brioché », « cuit »).
 Chaque recherche contient `label`, `brand`, `restaurant`, `city` (null si absent).
 Extraire obligatoirement la marque, l'établissement et la ville nommés dans le récit.
 Par exemple « fromage blanc 0% Auchan » devient label="fromage blanc 0%", brand="Auchan",
@@ -53,8 +68,9 @@ vérification obligatoire avant toute substitution générique. Après cette vé
   Ne pas déclarer un ingrédient indisponible sans l'avoir recherché (ex. lait d'une
   pâtisserie). Après une erreur d'outil, corriger les composants et réessayer plutôt
   que laisser l'ensemble du plat inconnu. Séparer les accompagnements clairement
-  cités lorsqu'ils ont déjà leurs propres références, au lieu de les abandonner
-  avec un seul composant manquant de l'assiette.
+  cités hors du plat (frites à côté, boisson, dessert), jamais les ingrédients
+  signalés « dedans », « garni de » ou appartenant à sa recette. Tous les
+  ingrédients calculés ensemble restent dans une seule ligne pour le plat entier.
   Si un seul aliment comparable représente raisonnablement le plat, il peut aussi
   servir de composant unique de l'estimation, avec la différence explicitée.
   Lire le NOM COMPLET de chaque candidat : un gâteau ne remplace pas une viande,
@@ -112,7 +128,9 @@ complexes gardent des approximations explicites. Aucun accès aux comptes privé
 aux jetons de connexion, au système ou à un journal extérieur.
 
 Avant la fiche finale, vérifier que chaque aliment du récit figure dans le bon
-créneau avec énergie et P/G/L, via une source ou une estimation visible. Une fibre
-manquante ne bloque pas l'énergie. Si un contrôle du serveur signale des valeurs
-absentes, compléter les compositions sans supprimer l'aliment ni modifier les
+créneau avec énergie et P/G/L, via une source ou une estimation visible.
+Un plat composé doit être couvert en entier, sans omission de sa base ou de ses
+ingrédients usuels supposés, sans doublon avec ses ingrédients, et dans son propre créneau.
+Une fibre manquante ne bloque pas l'énergie. Si un contrôle du serveur signale
+des valeurs absentes, compléter les compositions sans supprimer l'aliment ni modifier les
 quantités explicites. Les inconnues irréductibles restent visibles et le bilan partiel.

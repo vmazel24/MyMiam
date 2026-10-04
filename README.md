@@ -144,6 +144,18 @@ Le chargeur ne lit que ces deux chemins contrôlés. Les skills sont intégrés 
 instructions de ce workflow ; il ne s'agit pas d'un upload de skill hébergé ni
 d'une installation dans le profil global de Codex.
 
+Un plat composé est normalement une seule ligne du journal. Luna recherche une
+référence complète comparable ou calcule toute sa recette, en incluant les
+ingrédients usuels supposés et en les distinguant des ingrédients cités. Les
+exclusions explicites sont respectées ; accompagnements et boissons restent
+séparés. Le serveur refuse d'attribuer les valeurs d'un ingrédient isolé à un
+plat reconnu comme entier. Les corrections de dictée ne doivent pas créer
+d'aliments supplémentaires.
+Pour un burger reconstruit avec une recette partielle, le contrôle vérifie aussi
+le bun, la salade et la sauce usuels supposés. Les exclusions du récit et les
+recettes exhaustives sont respectées ; une recette de restaurant vérifiée ou
+une moyenne de burger entier ne reçoit pas d'ingrédients supplémentaires.
+
 Luna dispose de cinq fonctions locales, regroupées dans `nutrition` :
 `search_foods` recherche plusieurs aliments dans Ciqual et les produits Open Food
 Facts déjà enregistrés ; `calculate_portions` calcule les nutriments de portions
